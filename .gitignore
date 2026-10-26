@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+data/projects.json
+data/sessions/
+tmp-*.js
+*.log
