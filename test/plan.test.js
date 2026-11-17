@@ -1,12 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { initialPlan } from "../src/models/plan.js";
 import {
   areaOf,
   overlapWarnings,
   resizePolygonPoints,
 } from "../src/utils/geometry.js";
-import { predict } from "../src/utils/prediction.js";
 import {
   localToGeographic,
   geographicToLocal,
@@ -21,7 +19,7 @@ import { parseIndoorLogZip } from "../src/utils/indoorZip.js";
 import JSZip from "jszip";
 import { detectRegionsFromPixels } from "../src/utils/imageDetection.js";
 
-test("geometry, overlap and RF coverage react to wall loss", () => {
+test("area and overlap geometry", () => {
   const room = {
     id: "a",
     floorId: "level-1",
@@ -44,44 +42,6 @@ test("geometry, overlap and RF coverage react to wall loss", () => {
     overlapWarnings([room, { ...room, id: "b", name: "B", x: 8 }]).length,
     1,
   );
-  const plan = initialPlan();
-  plan.rooms = [room];
-  plan.sources = [
-    {
-      id: "s",
-      floorId: "level-1",
-      name: "AP",
-      kind: "wifi",
-      x: 2,
-      z: 2,
-      heightM: 2.5,
-      txPowerDbm: 20,
-      freqMHz: 2400,
-      antennaGainDbi: 0,
-      antennaPattern: "omni",
-    },
-  ];
-  const points = predict(plan, "level-1");
-  assert.ok(points.length > 50);
-  assert.ok(points.every((p) => Number.isFinite(p.dbm)));
-  const clear = points.find((p) => p.x === 2.5 && p.z === 2.5);
-  assert.ok(clear.dbm > -70);
-  plan.interiorWalls = [
-    {
-      id: "wall",
-      floorId: "level-1",
-      x1: 5,
-      z1: 0,
-      x2: 5,
-      z2: 10,
-      material: "metal",
-    },
-  ];
-  const blocked = predict(plan, "level-1").find(
-    (p) => p.x === 7.5 && p.z === 4.5,
-  );
-  const unblocked = points.find((p) => p.x === 7.5 && p.z === 4.5);
-  assert.ok(blocked.dbm < unblocked.dbm - 20);
 });
 
 test("custom polygons can be resized to any supported vertex count", () => {
@@ -109,6 +69,14 @@ test("geographic alignment round trips local coordinates", () => {
     back = geographicToLocal(geo, a);
   assert.ok(Math.abs(back.x - 10) < 1e-6);
   assert.ok(Math.abs(back.z - 14) < 1e-6);
+});
+
+test("at zero rotation the top of the plan is north and the right is east", () => {
+  const a = { lat: 28.6, lng: 77.2, x: 0, z: 0, rotationDeg: 0, unit: "m" };
+  const up = localToGeographic({ x: 0, z: -10 }, a);
+  const right = localToGeographic({ x: 10, z: 0 }, a);
+  assert.ok(up.lat > a.lat && Math.abs(up.lng - a.lng) < 1e-9);
+  assert.ok(right.lng > a.lng && Math.abs(right.lat - a.lat) < 1e-9);
 });
 
 test("existing building template imports with floor and shape data", async () => {

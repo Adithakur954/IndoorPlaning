@@ -1,18 +1,29 @@
 {
   "name": "indoor-planning-standalone",
-  "version": "1.0.0",
+  "version": "1.0.4",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
+    "desktop:build": "tauri build --bundles nsis",
+    "desktop:prepare": "node scripts/prepare-desktop.mjs",
+    "desktop:smoke": "node scripts/check-desktop.mjs",
+    "license:admin": "node scripts/license-admin.mjs",
+    "license:generator:build": "node scripts/build-license-generator.mjs",
+    "license:generator:check": "node scripts/check-license-generator.mjs",
+    "license:check": "node scripts/check-license-integration.mjs",
     "dev": "node scripts/dev.mjs",
     "build": "vite build",
     "start": "node server/index.js",
-    "test": "node --test"
+    "test": "node --experimental-test-module-mocks --test",
+    "sim:service": "node scripts/sim-service.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.4.0",
-    "exceljs": "^4.4.0",
+    "exceljs": "^3.4.0",
     "express": "^5.1.0",
     "jszip": "^3.10.1",
     "react": "^19.2.0",
@@ -22,6 +33,7 @@
     "vite": "^7.1.11"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.12.4",
     "prettier": "^3.9.10"
   }
 }

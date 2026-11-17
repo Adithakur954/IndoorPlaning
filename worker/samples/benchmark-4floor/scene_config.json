@@ -1,0 +1,1915 @@
+{
+  "exportVersion": 1,
+  "generator": "Indoor Planner scene export",
+  "note": "Geometry and material assumptions only. Not a prediction and not calibrated.",
+  "coordinateSystem": {
+    "scene": "Z-up, metres (Mitsuba/Sionna RT)",
+    "transform": "scene = (plan.x, -plan.z, plan.y_up)"
+  },
+  "materials": {
+    "drywall": "itu_plasterboard",
+    "wood": "itu_wood",
+    "glass": "itu_glass",
+    "brick": "itu_brick",
+    "concrete": "itu_concrete",
+    "metal": "itu_metal"
+  },
+  "materialThicknessAssumptions": {
+    "wallM": 0.2,
+    "slabM": 0.2,
+    "doorM": 0.04,
+    "windowM": 0.01,
+    "furnitureM": 0.03,
+    "source": "Assumed. Doors are modelled closed."
+  },
+  "floors": [
+    {
+      "id": "f1",
+      "name": "Level 1",
+      "elevationM": 0,
+      "radioMapPlane": {
+        "heightM": 1.5,
+        "center": [
+          20,
+          -12,
+          1.5
+        ],
+        "size": [
+          40,
+          24
+        ],
+        "cellSizeM": 1
+      }
+    },
+    {
+      "id": "f2",
+      "name": "Level 2",
+      "elevationM": 3.2,
+      "radioMapPlane": {
+        "heightM": 4.7,
+        "center": [
+          20,
+          -12,
+          4.7
+        ],
+        "size": [
+          40,
+          24
+        ],
+        "cellSizeM": 1
+      }
+    },
+    {
+      "id": "f3",
+      "name": "Level 3",
+      "elevationM": 6.4,
+      "radioMapPlane": {
+        "heightM": 7.9,
+        "center": [
+          20,
+          -12,
+          7.9
+        ],
+        "size": [
+          40,
+          24
+        ],
+        "cellSizeM": 1
+      }
+    },
+    {
+      "id": "f4",
+      "name": "Level 4",
+      "elevationM": 9.600000000000001,
+      "radioMapPlane": {
+        "heightM": 11.100000000000001,
+        "center": [
+          20,
+          -12,
+          11.100000000000001
+        ],
+        "size": [
+          40,
+          24
+        ],
+        "cellSizeM": 1
+      }
+    }
+  ],
+  "rooms": [
+    {
+      "id": "f1-r00",
+      "name": "f1-r00",
+      "floorId": "f1",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 0,
+          "z": 0
+        },
+        {
+          "x": 8,
+          "z": 0
+        },
+        {
+          "x": 8,
+          "z": 8
+        },
+        {
+          "x": 0,
+          "z": 8
+        }
+      ]
+    },
+    {
+      "id": "f1-r01",
+      "name": "f1-r01",
+      "floorId": "f1",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 0,
+          "z": 8
+        },
+        {
+          "x": 8,
+          "z": 8
+        },
+        {
+          "x": 8,
+          "z": 16
+        },
+        {
+          "x": 0,
+          "z": 16
+        }
+      ]
+    },
+    {
+      "id": "f1-r02",
+      "name": "f1-r02",
+      "floorId": "f1",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 0,
+          "z": 16
+        },
+        {
+          "x": 8,
+          "z": 16
+        },
+        {
+          "x": 8,
+          "z": 24
+        },
+        {
+          "x": 0,
+          "z": 24
+        }
+      ]
+    },
+    {
+      "id": "f1-r10",
+      "name": "f1-r10",
+      "floorId": "f1",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 8,
+          "z": 0
+        },
+        {
+          "x": 16,
+          "z": 0
+        },
+        {
+          "x": 16,
+          "z": 8
+        },
+        {
+          "x": 8,
+          "z": 8
+        }
+      ]
+    },
+    {
+      "id": "f1-r11",
+      "name": "f1-r11",
+      "floorId": "f1",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 8,
+          "z": 8
+        },
+        {
+          "x": 16,
+          "z": 8
+        },
+        {
+          "x": 16,
+          "z": 16
+        },
+        {
+          "x": 8,
+          "z": 16
+        }
+      ]
+    },
+    {
+      "id": "f1-r12",
+      "name": "f1-r12",
+      "floorId": "f1",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 8,
+          "z": 16
+        },
+        {
+          "x": 16,
+          "z": 16
+        },
+        {
+          "x": 16,
+          "z": 24
+        },
+        {
+          "x": 8,
+          "z": 24
+        }
+      ]
+    },
+    {
+      "id": "f1-r20",
+      "name": "f1-r20",
+      "floorId": "f1",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 16,
+          "z": 0
+        },
+        {
+          "x": 24,
+          "z": 0
+        },
+        {
+          "x": 24,
+          "z": 8
+        },
+        {
+          "x": 16,
+          "z": 8
+        }
+      ]
+    },
+    {
+      "id": "f1-r21",
+      "name": "f1-r21",
+      "floorId": "f1",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 16,
+          "z": 8
+        },
+        {
+          "x": 24,
+          "z": 8
+        },
+        {
+          "x": 24,
+          "z": 16
+        },
+        {
+          "x": 16,
+          "z": 16
+        }
+      ]
+    },
+    {
+      "id": "f1-r22",
+      "name": "f1-r22",
+      "floorId": "f1",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 16,
+          "z": 16
+        },
+        {
+          "x": 24,
+          "z": 16
+        },
+        {
+          "x": 24,
+          "z": 24
+        },
+        {
+          "x": 16,
+          "z": 24
+        }
+      ]
+    },
+    {
+      "id": "f1-r30",
+      "name": "f1-r30",
+      "floorId": "f1",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 24,
+          "z": 0
+        },
+        {
+          "x": 32,
+          "z": 0
+        },
+        {
+          "x": 32,
+          "z": 8
+        },
+        {
+          "x": 24,
+          "z": 8
+        }
+      ]
+    },
+    {
+      "id": "f1-r31",
+      "name": "f1-r31",
+      "floorId": "f1",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 24,
+          "z": 8
+        },
+        {
+          "x": 32,
+          "z": 8
+        },
+        {
+          "x": 32,
+          "z": 16
+        },
+        {
+          "x": 24,
+          "z": 16
+        }
+      ]
+    },
+    {
+      "id": "f1-r32",
+      "name": "f1-r32",
+      "floorId": "f1",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 24,
+          "z": 16
+        },
+        {
+          "x": 32,
+          "z": 16
+        },
+        {
+          "x": 32,
+          "z": 24
+        },
+        {
+          "x": 24,
+          "z": 24
+        }
+      ]
+    },
+    {
+      "id": "f1-r40",
+      "name": "f1-r40",
+      "floorId": "f1",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 32,
+          "z": 0
+        },
+        {
+          "x": 40,
+          "z": 0
+        },
+        {
+          "x": 40,
+          "z": 8
+        },
+        {
+          "x": 32,
+          "z": 8
+        }
+      ]
+    },
+    {
+      "id": "f1-r41",
+      "name": "f1-r41",
+      "floorId": "f1",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 32,
+          "z": 8
+        },
+        {
+          "x": 40,
+          "z": 8
+        },
+        {
+          "x": 40,
+          "z": 16
+        },
+        {
+          "x": 32,
+          "z": 16
+        }
+      ]
+    },
+    {
+      "id": "f1-r42",
+      "name": "f1-r42",
+      "floorId": "f1",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 32,
+          "z": 16
+        },
+        {
+          "x": 40,
+          "z": 16
+        },
+        {
+          "x": 40,
+          "z": 24
+        },
+        {
+          "x": 32,
+          "z": 24
+        }
+      ]
+    },
+    {
+      "id": "f2-r00",
+      "name": "f2-r00",
+      "floorId": "f2",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 0,
+          "z": 0
+        },
+        {
+          "x": 8,
+          "z": 0
+        },
+        {
+          "x": 8,
+          "z": 8
+        },
+        {
+          "x": 0,
+          "z": 8
+        }
+      ]
+    },
+    {
+      "id": "f2-r01",
+      "name": "f2-r01",
+      "floorId": "f2",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 0,
+          "z": 8
+        },
+        {
+          "x": 8,
+          "z": 8
+        },
+        {
+          "x": 8,
+          "z": 16
+        },
+        {
+          "x": 0,
+          "z": 16
+        }
+      ]
+    },
+    {
+      "id": "f2-r02",
+      "name": "f2-r02",
+      "floorId": "f2",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 0,
+          "z": 16
+        },
+        {
+          "x": 8,
+          "z": 16
+        },
+        {
+          "x": 8,
+          "z": 24
+        },
+        {
+          "x": 0,
+          "z": 24
+        }
+      ]
+    },
+    {
+      "id": "f2-r10",
+      "name": "f2-r10",
+      "floorId": "f2",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 8,
+          "z": 0
+        },
+        {
+          "x": 16,
+          "z": 0
+        },
+        {
+          "x": 16,
+          "z": 8
+        },
+        {
+          "x": 8,
+          "z": 8
+        }
+      ]
+    },
+    {
+      "id": "f2-r11",
+      "name": "f2-r11",
+      "floorId": "f2",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 8,
+          "z": 8
+        },
+        {
+          "x": 16,
+          "z": 8
+        },
+        {
+          "x": 16,
+          "z": 16
+        },
+        {
+          "x": 8,
+          "z": 16
+        }
+      ]
+    },
+    {
+      "id": "f2-r12",
+      "name": "f2-r12",
+      "floorId": "f2",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 8,
+          "z": 16
+        },
+        {
+          "x": 16,
+          "z": 16
+        },
+        {
+          "x": 16,
+          "z": 24
+        },
+        {
+          "x": 8,
+          "z": 24
+        }
+      ]
+    },
+    {
+      "id": "f2-r20",
+      "name": "f2-r20",
+      "floorId": "f2",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 16,
+          "z": 0
+        },
+        {
+          "x": 24,
+          "z": 0
+        },
+        {
+          "x": 24,
+          "z": 8
+        },
+        {
+          "x": 16,
+          "z": 8
+        }
+      ]
+    },
+    {
+      "id": "f2-r21",
+      "name": "f2-r21",
+      "floorId": "f2",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 16,
+          "z": 8
+        },
+        {
+          "x": 24,
+          "z": 8
+        },
+        {
+          "x": 24,
+          "z": 16
+        },
+        {
+          "x": 16,
+          "z": 16
+        }
+      ]
+    },
+    {
+      "id": "f2-r22",
+      "name": "f2-r22",
+      "floorId": "f2",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 16,
+          "z": 16
+        },
+        {
+          "x": 24,
+          "z": 16
+        },
+        {
+          "x": 24,
+          "z": 24
+        },
+        {
+          "x": 16,
+          "z": 24
+        }
+      ]
+    },
+    {
+      "id": "f2-r30",
+      "name": "f2-r30",
+      "floorId": "f2",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 24,
+          "z": 0
+        },
+        {
+          "x": 32,
+          "z": 0
+        },
+        {
+          "x": 32,
+          "z": 8
+        },
+        {
+          "x": 24,
+          "z": 8
+        }
+      ]
+    },
+    {
+      "id": "f2-r31",
+      "name": "f2-r31",
+      "floorId": "f2",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 24,
+          "z": 8
+        },
+        {
+          "x": 32,
+          "z": 8
+        },
+        {
+          "x": 32,
+          "z": 16
+        },
+        {
+          "x": 24,
+          "z": 16
+        }
+      ]
+    },
+    {
+      "id": "f2-r32",
+      "name": "f2-r32",
+      "floorId": "f2",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 24,
+          "z": 16
+        },
+        {
+          "x": 32,
+          "z": 16
+        },
+        {
+          "x": 32,
+          "z": 24
+        },
+        {
+          "x": 24,
+          "z": 24
+        }
+      ]
+    },
+    {
+      "id": "f2-r40",
+      "name": "f2-r40",
+      "floorId": "f2",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 32,
+          "z": 0
+        },
+        {
+          "x": 40,
+          "z": 0
+        },
+        {
+          "x": 40,
+          "z": 8
+        },
+        {
+          "x": 32,
+          "z": 8
+        }
+      ]
+    },
+    {
+      "id": "f2-r41",
+      "name": "f2-r41",
+      "floorId": "f2",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 32,
+          "z": 8
+        },
+        {
+          "x": 40,
+          "z": 8
+        },
+        {
+          "x": 40,
+          "z": 16
+        },
+        {
+          "x": 32,
+          "z": 16
+        }
+      ]
+    },
+    {
+      "id": "f2-r42",
+      "name": "f2-r42",
+      "floorId": "f2",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 32,
+          "z": 16
+        },
+        {
+          "x": 40,
+          "z": 16
+        },
+        {
+          "x": 40,
+          "z": 24
+        },
+        {
+          "x": 32,
+          "z": 24
+        }
+      ]
+    },
+    {
+      "id": "f3-r00",
+      "name": "f3-r00",
+      "floorId": "f3",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 0,
+          "z": 0
+        },
+        {
+          "x": 8,
+          "z": 0
+        },
+        {
+          "x": 8,
+          "z": 8
+        },
+        {
+          "x": 0,
+          "z": 8
+        }
+      ]
+    },
+    {
+      "id": "f3-r01",
+      "name": "f3-r01",
+      "floorId": "f3",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 0,
+          "z": 8
+        },
+        {
+          "x": 8,
+          "z": 8
+        },
+        {
+          "x": 8,
+          "z": 16
+        },
+        {
+          "x": 0,
+          "z": 16
+        }
+      ]
+    },
+    {
+      "id": "f3-r02",
+      "name": "f3-r02",
+      "floorId": "f3",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 0,
+          "z": 16
+        },
+        {
+          "x": 8,
+          "z": 16
+        },
+        {
+          "x": 8,
+          "z": 24
+        },
+        {
+          "x": 0,
+          "z": 24
+        }
+      ]
+    },
+    {
+      "id": "f3-r10",
+      "name": "f3-r10",
+      "floorId": "f3",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 8,
+          "z": 0
+        },
+        {
+          "x": 16,
+          "z": 0
+        },
+        {
+          "x": 16,
+          "z": 8
+        },
+        {
+          "x": 8,
+          "z": 8
+        }
+      ]
+    },
+    {
+      "id": "f3-r11",
+      "name": "f3-r11",
+      "floorId": "f3",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 8,
+          "z": 8
+        },
+        {
+          "x": 16,
+          "z": 8
+        },
+        {
+          "x": 16,
+          "z": 16
+        },
+        {
+          "x": 8,
+          "z": 16
+        }
+      ]
+    },
+    {
+      "id": "f3-r12",
+      "name": "f3-r12",
+      "floorId": "f3",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 8,
+          "z": 16
+        },
+        {
+          "x": 16,
+          "z": 16
+        },
+        {
+          "x": 16,
+          "z": 24
+        },
+        {
+          "x": 8,
+          "z": 24
+        }
+      ]
+    },
+    {
+      "id": "f3-r20",
+      "name": "f3-r20",
+      "floorId": "f3",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 16,
+          "z": 0
+        },
+        {
+          "x": 24,
+          "z": 0
+        },
+        {
+          "x": 24,
+          "z": 8
+        },
+        {
+          "x": 16,
+          "z": 8
+        }
+      ]
+    },
+    {
+      "id": "f3-r21",
+      "name": "f3-r21",
+      "floorId": "f3",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 16,
+          "z": 8
+        },
+        {
+          "x": 24,
+          "z": 8
+        },
+        {
+          "x": 24,
+          "z": 16
+        },
+        {
+          "x": 16,
+          "z": 16
+        }
+      ]
+    },
+    {
+      "id": "f3-r22",
+      "name": "f3-r22",
+      "floorId": "f3",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 16,
+          "z": 16
+        },
+        {
+          "x": 24,
+          "z": 16
+        },
+        {
+          "x": 24,
+          "z": 24
+        },
+        {
+          "x": 16,
+          "z": 24
+        }
+      ]
+    },
+    {
+      "id": "f3-r30",
+      "name": "f3-r30",
+      "floorId": "f3",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 24,
+          "z": 0
+        },
+        {
+          "x": 32,
+          "z": 0
+        },
+        {
+          "x": 32,
+          "z": 8
+        },
+        {
+          "x": 24,
+          "z": 8
+        }
+      ]
+    },
+    {
+      "id": "f3-r31",
+      "name": "f3-r31",
+      "floorId": "f3",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 24,
+          "z": 8
+        },
+        {
+          "x": 32,
+          "z": 8
+        },
+        {
+          "x": 32,
+          "z": 16
+        },
+        {
+          "x": 24,
+          "z": 16
+        }
+      ]
+    },
+    {
+      "id": "f3-r32",
+      "name": "f3-r32",
+      "floorId": "f3",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 24,
+          "z": 16
+        },
+        {
+          "x": 32,
+          "z": 16
+        },
+        {
+          "x": 32,
+          "z": 24
+        },
+        {
+          "x": 24,
+          "z": 24
+        }
+      ]
+    },
+    {
+      "id": "f3-r40",
+      "name": "f3-r40",
+      "floorId": "f3",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 32,
+          "z": 0
+        },
+        {
+          "x": 40,
+          "z": 0
+        },
+        {
+          "x": 40,
+          "z": 8
+        },
+        {
+          "x": 32,
+          "z": 8
+        }
+      ]
+    },
+    {
+      "id": "f3-r41",
+      "name": "f3-r41",
+      "floorId": "f3",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 32,
+          "z": 8
+        },
+        {
+          "x": 40,
+          "z": 8
+        },
+        {
+          "x": 40,
+          "z": 16
+        },
+        {
+          "x": 32,
+          "z": 16
+        }
+      ]
+    },
+    {
+      "id": "f3-r42",
+      "name": "f3-r42",
+      "floorId": "f3",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 32,
+          "z": 16
+        },
+        {
+          "x": 40,
+          "z": 16
+        },
+        {
+          "x": 40,
+          "z": 24
+        },
+        {
+          "x": 32,
+          "z": 24
+        }
+      ]
+    },
+    {
+      "id": "f4-r00",
+      "name": "f4-r00",
+      "floorId": "f4",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 0,
+          "z": 0
+        },
+        {
+          "x": 8,
+          "z": 0
+        },
+        {
+          "x": 8,
+          "z": 8
+        },
+        {
+          "x": 0,
+          "z": 8
+        }
+      ]
+    },
+    {
+      "id": "f4-r01",
+      "name": "f4-r01",
+      "floorId": "f4",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 0,
+          "z": 8
+        },
+        {
+          "x": 8,
+          "z": 8
+        },
+        {
+          "x": 8,
+          "z": 16
+        },
+        {
+          "x": 0,
+          "z": 16
+        }
+      ]
+    },
+    {
+      "id": "f4-r02",
+      "name": "f4-r02",
+      "floorId": "f4",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 0,
+          "z": 16
+        },
+        {
+          "x": 8,
+          "z": 16
+        },
+        {
+          "x": 8,
+          "z": 24
+        },
+        {
+          "x": 0,
+          "z": 24
+        }
+      ]
+    },
+    {
+      "id": "f4-r10",
+      "name": "f4-r10",
+      "floorId": "f4",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 8,
+          "z": 0
+        },
+        {
+          "x": 16,
+          "z": 0
+        },
+        {
+          "x": 16,
+          "z": 8
+        },
+        {
+          "x": 8,
+          "z": 8
+        }
+      ]
+    },
+    {
+      "id": "f4-r11",
+      "name": "f4-r11",
+      "floorId": "f4",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 8,
+          "z": 8
+        },
+        {
+          "x": 16,
+          "z": 8
+        },
+        {
+          "x": 16,
+          "z": 16
+        },
+        {
+          "x": 8,
+          "z": 16
+        }
+      ]
+    },
+    {
+      "id": "f4-r12",
+      "name": "f4-r12",
+      "floorId": "f4",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 8,
+          "z": 16
+        },
+        {
+          "x": 16,
+          "z": 16
+        },
+        {
+          "x": 16,
+          "z": 24
+        },
+        {
+          "x": 8,
+          "z": 24
+        }
+      ]
+    },
+    {
+      "id": "f4-r20",
+      "name": "f4-r20",
+      "floorId": "f4",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 16,
+          "z": 0
+        },
+        {
+          "x": 24,
+          "z": 0
+        },
+        {
+          "x": 24,
+          "z": 8
+        },
+        {
+          "x": 16,
+          "z": 8
+        }
+      ]
+    },
+    {
+      "id": "f4-r21",
+      "name": "f4-r21",
+      "floorId": "f4",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 16,
+          "z": 8
+        },
+        {
+          "x": 24,
+          "z": 8
+        },
+        {
+          "x": 24,
+          "z": 16
+        },
+        {
+          "x": 16,
+          "z": 16
+        }
+      ]
+    },
+    {
+      "id": "f4-r22",
+      "name": "f4-r22",
+      "floorId": "f4",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 16,
+          "z": 16
+        },
+        {
+          "x": 24,
+          "z": 16
+        },
+        {
+          "x": 24,
+          "z": 24
+        },
+        {
+          "x": 16,
+          "z": 24
+        }
+      ]
+    },
+    {
+      "id": "f4-r30",
+      "name": "f4-r30",
+      "floorId": "f4",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 24,
+          "z": 0
+        },
+        {
+          "x": 32,
+          "z": 0
+        },
+        {
+          "x": 32,
+          "z": 8
+        },
+        {
+          "x": 24,
+          "z": 8
+        }
+      ]
+    },
+    {
+      "id": "f4-r31",
+      "name": "f4-r31",
+      "floorId": "f4",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 24,
+          "z": 8
+        },
+        {
+          "x": 32,
+          "z": 8
+        },
+        {
+          "x": 32,
+          "z": 16
+        },
+        {
+          "x": 24,
+          "z": 16
+        }
+      ]
+    },
+    {
+      "id": "f4-r32",
+      "name": "f4-r32",
+      "floorId": "f4",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 24,
+          "z": 16
+        },
+        {
+          "x": 32,
+          "z": 16
+        },
+        {
+          "x": 32,
+          "z": 24
+        },
+        {
+          "x": 24,
+          "z": 24
+        }
+      ]
+    },
+    {
+      "id": "f4-r40",
+      "name": "f4-r40",
+      "floorId": "f4",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 32,
+          "z": 0
+        },
+        {
+          "x": 40,
+          "z": 0
+        },
+        {
+          "x": 40,
+          "z": 8
+        },
+        {
+          "x": 32,
+          "z": 8
+        }
+      ]
+    },
+    {
+      "id": "f4-r41",
+      "name": "f4-r41",
+      "floorId": "f4",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 32,
+          "z": 8
+        },
+        {
+          "x": 40,
+          "z": 8
+        },
+        {
+          "x": 40,
+          "z": 16
+        },
+        {
+          "x": 32,
+          "z": 16
+        }
+      ]
+    },
+    {
+      "id": "f4-r42",
+      "name": "f4-r42",
+      "floorId": "f4",
+      "heightM": 3,
+      "points": [
+        {
+          "x": 32,
+          "z": 16
+        },
+        {
+          "x": 40,
+          "z": 16
+        },
+        {
+          "x": 40,
+          "z": 24
+        },
+        {
+          "x": 32,
+          "z": 24
+        }
+      ]
+    }
+  ],
+  "boundaries": [],
+  "accessPoints": [
+    {
+      "id": "ap-f1-8",
+      "name": "AP-f1-8",
+      "kind": "wifi",
+      "technology": null,
+      "floorId": "f1",
+      "position": [
+        8,
+        -12,
+        2.7
+      ],
+      "planPosition": {
+        "x": 8,
+        "z": 12,
+        "heightAboveFloorM": 2.7
+      },
+      "txPowerDbm": 20,
+      "frequencyMHz": 5000,
+      "channel": null,
+      "bandwidthMHz": 20,
+      "antennaGainDbi": 0,
+      "antennaPattern": "omni",
+      "azimuthDeg": 0,
+      "beamwidthDeg": 120
+    },
+    {
+      "id": "ap-f1-20",
+      "name": "AP-f1-20",
+      "kind": "wifi",
+      "technology": null,
+      "floorId": "f1",
+      "position": [
+        20,
+        -12,
+        2.7
+      ],
+      "planPosition": {
+        "x": 20,
+        "z": 12,
+        "heightAboveFloorM": 2.7
+      },
+      "txPowerDbm": 20,
+      "frequencyMHz": 5000,
+      "channel": null,
+      "bandwidthMHz": 20,
+      "antennaGainDbi": 0,
+      "antennaPattern": "omni",
+      "azimuthDeg": 0,
+      "beamwidthDeg": 120
+    },
+    {
+      "id": "ap-f1-32",
+      "name": "AP-f1-32",
+      "kind": "wifi",
+      "technology": null,
+      "floorId": "f1",
+      "position": [
+        32,
+        -12,
+        2.7
+      ],
+      "planPosition": {
+        "x": 32,
+        "z": 12,
+        "heightAboveFloorM": 2.7
+      },
+      "txPowerDbm": 20,
+      "frequencyMHz": 5000,
+      "channel": null,
+      "bandwidthMHz": 20,
+      "antennaGainDbi": 0,
+      "antennaPattern": "omni",
+      "azimuthDeg": 0,
+      "beamwidthDeg": 120
+    },
+    {
+      "id": "ap-f2-8",
+      "name": "AP-f2-8",
+      "kind": "wifi",
+      "technology": null,
+      "floorId": "f2",
+      "position": [
+        8,
+        -12,
+        5.9
+      ],
+      "planPosition": {
+        "x": 8,
+        "z": 12,
+        "heightAboveFloorM": 2.7
+      },
+      "txPowerDbm": 20,
+      "frequencyMHz": 5000,
+      "channel": null,
+      "bandwidthMHz": 20,
+      "antennaGainDbi": 0,
+      "antennaPattern": "omni",
+      "azimuthDeg": 0,
+      "beamwidthDeg": 120
+    },
+    {
+      "id": "ap-f2-20",
+      "name": "AP-f2-20",
+      "kind": "wifi",
+      "technology": null,
+      "floorId": "f2",
+      "position": [
+        20,
+        -12,
+        5.9
+      ],
+      "planPosition": {
+        "x": 20,
+        "z": 12,
+        "heightAboveFloorM": 2.7
+      },
+      "txPowerDbm": 20,
+      "frequencyMHz": 5000,
+      "channel": null,
+      "bandwidthMHz": 20,
+      "antennaGainDbi": 0,
+      "antennaPattern": "omni",
+      "azimuthDeg": 0,
+      "beamwidthDeg": 120
+    },
+    {
+      "id": "ap-f2-32",
+      "name": "AP-f2-32",
+      "kind": "wifi",
+      "technology": null,
+      "floorId": "f2",
+      "position": [
+        32,
+        -12,
+        5.9
+      ],
+      "planPosition": {
+        "x": 32,
+        "z": 12,
+        "heightAboveFloorM": 2.7
+      },
+      "txPowerDbm": 20,
+      "frequencyMHz": 5000,
+      "channel": null,
+      "bandwidthMHz": 20,
+      "antennaGainDbi": 0,
+      "antennaPattern": "omni",
+      "azimuthDeg": 0,
+      "beamwidthDeg": 120
+    },
+    {
+      "id": "ap-f3-8",
+      "name": "AP-f3-8",
+      "kind": "wifi",
+      "technology": null,
+      "floorId": "f3",
+      "position": [
+        8,
+        -12,
+        9.100000000000001
+      ],
+      "planPosition": {
+        "x": 8,
+        "z": 12,
+        "heightAboveFloorM": 2.7
+      },
+      "txPowerDbm": 20,
+      "frequencyMHz": 5000,
+      "channel": null,
+      "bandwidthMHz": 20,
+      "antennaGainDbi": 0,
+      "antennaPattern": "omni",
+      "azimuthDeg": 0,
+      "beamwidthDeg": 120
+    },
+    {
+      "id": "ap-f3-20",
+      "name": "AP-f3-20",
+      "kind": "wifi",
+      "technology": null,
+      "floorId": "f3",
+      "position": [
+        20,
+        -12,
+        9.100000000000001
+      ],
+      "planPosition": {
+        "x": 20,
+        "z": 12,
+        "heightAboveFloorM": 2.7
+      },
+      "txPowerDbm": 20,
+      "frequencyMHz": 5000,
+      "channel": null,
+      "bandwidthMHz": 20,
+      "antennaGainDbi": 0,
+      "antennaPattern": "omni",
+      "azimuthDeg": 0,
+      "beamwidthDeg": 120
+    },
+    {
+      "id": "ap-f3-32",
+      "name": "AP-f3-32",
+      "kind": "wifi",
+      "technology": null,
+      "floorId": "f3",
+      "position": [
+        32,
+        -12,
+        9.100000000000001
+      ],
+      "planPosition": {
+        "x": 32,
+        "z": 12,
+        "heightAboveFloorM": 2.7
+      },
+      "txPowerDbm": 20,
+      "frequencyMHz": 5000,
+      "channel": null,
+      "bandwidthMHz": 20,
+      "antennaGainDbi": 0,
+      "antennaPattern": "omni",
+      "azimuthDeg": 0,
+      "beamwidthDeg": 120
+    },
+    {
+      "id": "ap-f4-8",
+      "name": "AP-f4-8",
+      "kind": "wifi",
+      "technology": null,
+      "floorId": "f4",
+      "position": [
+        8,
+        -12,
+        12.3
+      ],
+      "planPosition": {
+        "x": 8,
+        "z": 12,
+        "heightAboveFloorM": 2.7
+      },
+      "txPowerDbm": 20,
+      "frequencyMHz": 5000,
+      "channel": null,
+      "bandwidthMHz": 20,
+      "antennaGainDbi": 0,
+      "antennaPattern": "omni",
+      "azimuthDeg": 0,
+      "beamwidthDeg": 120
+    },
+    {
+      "id": "ap-f4-20",
+      "name": "AP-f4-20",
+      "kind": "wifi",
+      "technology": null,
+      "floorId": "f4",
+      "position": [
+        20,
+        -12,
+        12.3
+      ],
+      "planPosition": {
+        "x": 20,
+        "z": 12,
+        "heightAboveFloorM": 2.7
+      },
+      "txPowerDbm": 20,
+      "frequencyMHz": 5000,
+      "channel": null,
+      "bandwidthMHz": 20,
+      "antennaGainDbi": 0,
+      "antennaPattern": "omni",
+      "azimuthDeg": 0,
+      "beamwidthDeg": 120
+    },
+    {
+      "id": "ap-f4-32",
+      "name": "AP-f4-32",
+      "kind": "wifi",
+      "technology": null,
+      "floorId": "f4",
+      "position": [
+        32,
+        -12,
+        12.3
+      ],
+      "planPosition": {
+        "x": 32,
+        "z": 12,
+        "heightAboveFloorM": 2.7
+      },
+      "txPowerDbm": 20,
+      "frequencyMHz": 5000,
+      "channel": null,
+      "bandwidthMHz": 20,
+      "antennaGainDbi": 0,
+      "antennaPattern": "omni",
+      "azimuthDeg": 0,
+      "beamwidthDeg": 120
+    }
+  ],
+  "meshes": [
+    {
+      "shapeId": "mesh-ceiling-concrete",
+      "file": "meshes/ceiling__concrete.ply",
+      "role": "ceiling",
+      "planMaterial": "concrete",
+      "radioMaterial": "itu_concrete",
+      "thicknessM": 0.2,
+      "vertices": 60,
+      "triangles": 30
+    },
+    {
+      "shapeId": "mesh-door-wood",
+      "file": "meshes/door__wood.ply",
+      "role": "door",
+      "planMaterial": "wood",
+      "radioMaterial": "itu_wood",
+      "thicknessM": 0.04,
+      "vertices": 80,
+      "triangles": 40
+    },
+    {
+      "shapeId": "mesh-slab-concrete",
+      "file": "meshes/slab__concrete.ply",
+      "role": "slab",
+      "planMaterial": "concrete",
+      "radioMaterial": "itu_concrete",
+      "thicknessM": 0.2,
+      "vertices": 240,
+      "triangles": 120
+    },
+    {
+      "shapeId": "mesh-wall-brick",
+      "file": "meshes/wall__brick.ply",
+      "role": "wall",
+      "planMaterial": "brick",
+      "radioMaterial": "itu_brick",
+      "thicknessM": 0.2,
+      "vertices": 672,
+      "triangles": 336
+    },
+    {
+      "shapeId": "mesh-wall-drywall",
+      "file": "meshes/wall__drywall.ply",
+      "role": "wall",
+      "planMaterial": "drywall",
+      "radioMaterial": "itu_plasterboard",
+      "thicknessM": 0.2,
+      "vertices": 816,
+      "triangles": 408
+    },
+    {
+      "shapeId": "mesh-window-glass",
+      "file": "meshes/window__glass.ply",
+      "role": "window",
+      "planMaterial": "glass",
+      "radioMaterial": "itu_glass",
+      "thicknessM": 0.01,
+      "vertices": 240,
+      "triangles": 120
+    }
+  ],
+  "stats": {
+    "wallPieces": 372,
+    "openings": 80,
+    "sharedEdges": 88,
+    "boundaries": 0,
+    "includeFurniture": false
+  },
+  "warnings": [],
+  "contentSha256": "30d4e320eefc8e297a6306d3e201eda0357831e756ded0f84e36f17e2af273b0"
+}

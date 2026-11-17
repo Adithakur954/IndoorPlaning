@@ -1,3 +1,5 @@
+import companySvg from "../assets/company-logo.svg?raw";
+import LicenseBadge from "../components/LicenseBadge.jsx";
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { initialPlan } from "../models/plan.js";
@@ -6,6 +8,11 @@ import {
   deleteProject,
   listProjects,
 } from "../services/projects.js";
+
+// Crop the logo's empty margins (same crop as the report header).
+const companyLogo = `data:image/svg+xml;utf8,${encodeURIComponent(
+  companySvg.replace(/viewBox="[^"]*"/, 'viewBox="70 110 620 300"'),
+)}`;
 
 export default function ProjectsPage() {
   const navigate = useNavigate();
@@ -48,15 +55,18 @@ export default function ProjectsPage() {
     <div className="shell">
       <header className="topbar">
         <div className="brand">
-          <span className="brand-icon">⌗</span>
+          <img className="brand-logo" src={companyLogo} alt="Company logo" />
           <div>
             <strong>Indoor Planner</strong>
             <small>Spatial design and RF analysis</small>
           </div>
         </div>
-        <button className="primary" onClick={create}>
-          + New project
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginLeft: "auto" }}>
+          <LicenseBadge />
+          <button className="primary" onClick={create}>
+            + New project
+          </button>
+        </div>
       </header>
       <main className="landing">
         <div className="hero">

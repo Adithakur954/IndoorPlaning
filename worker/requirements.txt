@@ -1,0 +1,10 @@
+sionna-rt>=2.2,<3
+psutil>=5.9
+
+# floor plan image -> building (worker/floorplan): all free, run on the CPU
+opencv-python-headless>=4.9
+scikit-image>=0.22
+shapely>=2.0
+pypdfium2>=4.30
+rapidocr>=3.0
+onnxruntime>=1.17

@@ -21,7 +21,7 @@ Open the **Local** URL printed in the terminal. The project list is the starting
 4. Projects save automatically after edits. The Editor header shows the save status. Wait for **Saved** before closing the app or navigating away after a large import.
 5. Select a project card to reopen it. Use its delete action to remove a project.
 
-Projects and their plans are stored locally by the app server. Back up `data/projects.json` to keep a copy of saved project data.
+Projects and their plans are stored locally in `data/projects.sqlite`. Existing JSON projects are imported automatically once. To back up your work, stop both services and copy the data directory, including simulation outputs. See [Project storage](PROJECT_STORAGE.md) for details and custom storage paths.
 
 ## 3. Draw and edit a floor
 

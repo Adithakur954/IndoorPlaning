@@ -22,6 +22,7 @@ export async function loadSessions(ids, floorId, alignment) {
       ...parsed.logs.map((log, index) => ({
         ...log,
         id: `${id}-${log.id ?? index}`,
+        source: `Session ${id}`,
         floorId: log.floorId || floorId,
       })),
     );

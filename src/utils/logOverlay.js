@@ -33,6 +33,23 @@ export function getMetricRanges(plan, metric) {
   );
 }
 
+// The bands with open ends: a value below the lowest band or above the highest
+// takes that band's colour instead of falling outside every band (grey). A
+// strong signal next to an AP is "very good", not "no data".
+export function openEndedBands(ranges) {
+  if (!ranges?.length) return ranges || [];
+  const order = ranges
+    .map((r, i) => [Number(r.min ?? -Infinity), i])
+    .sort((a, b) => a[0] - b[0]);
+  const first = order[0][1],
+    last = order[order.length - 1][1];
+  return ranges.map((r, i) => ({
+    ...r,
+    min: i === first ? -Infinity : r.min,
+    max: i === last ? Infinity : r.max,
+  }));
+}
+
 export function getMetricColor(value, ranges) {
   if (
     value === null ||
@@ -42,7 +59,7 @@ export function getMetricColor(value, ranges) {
   )
     return "#808080";
   return (
-    ranges.find(
+    openEndedBands(ranges).find(
       (range) =>
         Number(value) >= Number(range.min ?? -Infinity) &&
         Number(value) < Number(range.max ?? Infinity),
