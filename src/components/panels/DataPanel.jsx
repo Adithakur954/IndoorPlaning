@@ -2,6 +2,8 @@ import React from "react";
 import Field from "../ui/Field.jsx";
 import { INDOOR_LOG_KPIS } from "../../utils/indoorLogKpis.js";
 import { num } from "../../utils/number.js";
+import LogManager from "../planner/LogManager.jsx";
+import FloorplanImport from "../planner/FloorplanImport.jsx";
 
 export default function DataPanel({
   importBuilding,
@@ -9,7 +11,6 @@ export default function DataPanel({
   imageWidth,
   setImageWidth,
   importImage,
-  traceImage,
   plan,
   floorId,
   busy,
@@ -23,6 +24,8 @@ export default function DataPanel({
   discardDraft,
   mutate,
   setTab,
+  setMessage,
+  setHiddenLayers,
   reviewedWorkbook,
   importLogs,
   sessionInput,
@@ -32,6 +35,7 @@ export default function DataPanel({
   availableSessions,
   metric,
   setMetric,
+  kpiOptions = INDOOR_LOG_KPIS,
   logsVisible,
   setLogsVisible,
   logGrid,
@@ -48,6 +52,14 @@ export default function DataPanel({
 }) {
   return (
     <div className="panel-grid">
+      <FloorplanImport
+        plan={plan}
+        floorId={floorId}
+        mutate={mutate}
+        setMessage={setMessage}
+        setTab={setTab}
+        hideImage={() => setHiddenLayers?.((l) => (l.includes("image") ? l : [...l, "image"]))}
+      />
       <section className="panel">
         <h2>Building plans</h2>
         <p>
@@ -64,11 +76,10 @@ export default function DataPanel({
         </label>
         <button onClick={template}>Download example template</button>
         <hr />
-        <h3>Floor image to playground</h3>
+        <h3>Simple room scan (rectangles only)</h3>
         <p>
-          Upload a floor-plan image. The quick scan finds enclosed rooms only.
-          For open offices like your drawing, run the AI trace to propose rooms,
-          walls, and desk groups. Check the overlay before applying it.
+          Upload a floor-plan image. The quick scan finds enclosed rooms only;
+          check the result before applying it.
         </p>
         <Field
           label="Image width in metres"
@@ -85,17 +96,6 @@ export default function DataPanel({
             onChange={(e) => importImage(e.target.files[0])}
           />
         </label>
-        {plan.images[floorId] && (
-          <div className="row">
-            <button className="primary" disabled={busy} onClick={traceImage}>
-              Trace full plan with AI
-            </button>
-            <small>
-              AI tracing uses the uploaded image and may take a minute. Review
-              its geometry before applying.
-            </small>
-          </div>
-        )}
         {draftRooms && draftFloorId === floorId && (
           <div className="review">
             <h4>
@@ -202,7 +202,7 @@ export default function DataPanel({
         <Field
           label="KPI"
           value={metric}
-          options={INDOOR_LOG_KPIS.map((k) => k.key)}
+          options={kpiOptions.map((k) => k.key)}
           onChange={setMetric}
         />
         <label className="check">
@@ -322,8 +322,59 @@ export default function DataPanel({
                 }))
               }
             />
+            <button
+              type="button"
+              className="threshold-remove"
+              aria-label="Remove this band"
+              title="Remove this band"
+              disabled={metricRanges.length <= 2}
+              onClick={() =>
+                mutate((p) => ({
+                  ...p,
+                  thresholds: {
+                    ...p.thresholds,
+                    [metric]: metricRanges.filter((_, j) => j !== i),
+                  },
+                }))
+              }
+            >
+              ×
+            </button>
           </div>
         ))}
+        <button
+          type="button"
+          className="threshold-add"
+          onClick={() =>
+            mutate((p) => {
+              const bands = [...metricRanges];
+              const last = bands[bands.length - 1];
+              const unit = INDOOR_LOG_KPIS.find((k) => k.key === metric)?.unit;
+              // a new band continues from the top of the last one (10 units wide)
+              let start = Number.isFinite(Number(last?.max)) ? Number(last.max) : null;
+              if (start === null) {
+                start = (Number.isFinite(Number(last?.min)) ? Number(last.min) : 0) + 10;
+                bands[bands.length - 1] = { ...last, max: start };
+              }
+              const end = start + 10;
+              bands.push({
+                min: start,
+                max: end,
+                color: "#2563eb",
+                label: `${start} to ${end}${unit ? ` ${unit}` : ""}`,
+              });
+              return { ...p, thresholds: { ...p.thresholds, [metric]: bands } };
+            })
+          }
+        >
+          + Add row
+        </button>
+        <LogManager
+          plan={plan}
+          mutate={mutate}
+          floorId={floorId}
+          metric={metric}
+        />
         <div className="row">
           <button onClick={() => setTab("design")}>
             View overlays in editor

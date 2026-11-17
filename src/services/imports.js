@@ -9,7 +9,8 @@ import { parseIndoorLogZip } from "../utils/indoorZip.js";
 import { detectRooms } from "../utils/imageDetection.js";
 import { createStoryBuildingTemplateWorkbook } from "../templates/buildingTemplate.js";
 
-const fileBytes = async (file) => new Uint8Array(await file.arrayBuffer());
+// ExcelJS in the browser accepts an ArrayBuffer (not a plain Uint8Array) as its input
+const fileBytes = async (file) => file.arrayBuffer();
 
 export async function readBuilding(file) {
   const parsed = await parseBuildingWorkbook(await fileBytes(file));

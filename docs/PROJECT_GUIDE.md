@@ -1,6 +1,6 @@
 # Project guide
 
-This guide describes how Indoor Planner starts, how a project moves through the app, and where to make changes. The project is a local React application backed by a Node/Express API. Project plans and preferences are saved as JSON in `data/projects.json`.
+This guide describes how Indoor Planner starts, how a project moves through the app, and where to make changes. The project is a local React application backed by a Node/Express API. Projects are stored in SQLite at `data/projects.sqlite`, with complete plan JSON in related rows. See [Project storage](PROJECT_STORAGE.md) for schema, migration, and backups. Node.js 24 or later is required.
 
 ## Runtime flow
 
@@ -17,7 +17,7 @@ Browser
                                       ↓
                          projectService.js → projectRepository.js
                                       ↓
-                             data/projects.json
+                             data/projects.sqlite
 ```
 
 `npm run dev` starts the Vite frontend and the local API. The development launcher chooses available ports and configures the Vite API proxy. In production, `server/app.js` serves the Vite `dist` files when present and falls back to `index.html` for client routes.
@@ -27,7 +27,7 @@ Browser
 1. `ProjectsPage.jsx` lists projects and creates or deletes them through `src/services/projects.js`.
 2. `PlannerPage.jsx` loads a project, merges its saved plan with defaults from `src/models/plan.js`, and owns the current editor state.
 3. Editing actions call `mutate` or update view state. Changes are marked unsaved and saved after a short debounce through `saveProject`.
-4. The API validates the basic project shape, updates the project record, and serializes writes through a promise queue. The repository writes a temporary file and renames it to `data/projects.json` so a partial write does not replace the saved file.
+4. The API validates the basic project shape and updates project metadata, plan JSON, and saved-result references in one SQLite transaction. Project listings read indexed metadata without parsing every plan. Existing `data/projects.json` records are imported once and the source file is preserved.
 5. View preferences such as 2D/3D mode, grid snapping, room labels, furniture labels, and Wi-Fi antenna labels are stored under `plan.preferences`. Older projects get defaults when loaded.
 
 The plan is the shared source of truth for both visualizations. It contains floors, rooms, doors, windows, interior walls, furniture, network sources, RF settings, logs, geographic alignment, imported images, and view preferences. 2D and 3D views receive the same plan and editing callbacks.
@@ -106,11 +106,13 @@ EditorQuickTools or Inspector
 | `server/app.js` | Express middleware, API routers, static production hosting, and error handling. |
 | `server/routes/` | HTTP endpoints for projects, sessions, and floor tracing. |
 | `server/services/projectService.js` | Project validation and CRUD behavior. |
-| `server/repositories/projectRepository.js` | Queued JSON file reads and atomic project writes. |
+| `server/repositories/projectRepository.js` | Shared SQLite project store connection. |
+| `server/repositories/projectStore.js` | Schema, one-time JSON migration, and transactional CRUD. |
 | `server/services/sessionService.js` | Reads local CSV/JSON session files. |
 | `server/services/floorTrace.js` | OpenAI request and validated trace normalization. |
 | `server/config/paths.js` | Resolves data and production build directories. |
-| `data/projects.json` | Local project database file. Back it up to retain projects. |
+| `data/projects.sqlite` | Local SQLite project database. See the storage guide for consistent backups. |
+| `data/projects.json` | Preserved legacy migration source; no longer updated. |
 
 ## Where to change common behavior
 

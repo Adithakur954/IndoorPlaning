@@ -1,88 +1,71 @@
-import React from "react";
+import React, { useState } from "react";
 import Field from "../ui/Field.jsx";
-
+import { buildSceneZip, downloadBlob } from "../../utils/sceneExport.js";
+import ApProfileEditor from "../planner/ApProfileEditor.jsx";
 export default function NetworkPanel({
   plan,
   mutate,
-  heatmap,
-  setHeatmap,
-  predictions,
-  coverage,
-  coveredArea,
-  totalArea,
   sources,
   setTab,
   setSelected,
+  optimization,
 }) {
+  const [exportState, setExportState] = useState(null);
+  const [allFloors, setAllFloors] = useState(true);
+  const [furniture, setFurniture] = useState(false);
+  const exportScene = async () => {
+    setExportState({ busy: true });
+    try {
+      const { blob, config, warnings } = await buildSceneZip(plan, {
+        floorIds: allFloors ? undefined : [plan.selectedFloorId],
+        includeFurniture: furniture,
+      });
+      downloadBlob(blob, "ray-tracing-scene.zip");
+      setExportState({
+        done: `Exported ${config.meshes.length} meshes, ${config.accessPoints.length} access points.`,
+        warnings,
+      });
+    } catch (error) {
+      setExportState({ error: error.message, warnings: error.warnings });
+    }
+  };
   return (
     <div className="panel-grid">
+      {optimization && <ApProfileEditor plan={plan} mutate={mutate} optimization={optimization} />}
       <section className="panel">
-        <h2>RF prediction</h2>
+        <h2>Ray-tracing scene export</h2>
         <p>
-          Free-space path loss with directional antenna attenuation and material
-          or door penetration loss. Values are estimates for planning.
+          Builds the 3D walls, openings and floor slabs shown in the 3D view as
+          PLY meshes with a Mitsuba scene file, ITU-R radio materials and the
+          access-point configuration, for a Sionna RT simulation worker. It
+          contains geometry and material assumptions only.
         </p>
-        <div className="form-grid">
-          {[
-            ["gridStepM", "Grid step (m)"],
-            ["thresholdDbm", "Covered threshold (dBm)"],
-            ["rxGainDbi", "Receiver gain (dBi)"],
-            ["wallLossDb", "Other wall loss (dB)"],
-            ["doorLossDb", "Door loss (dB)"],
-          ].map(([k, label]) => (
-            <Field
-              key={k}
-              label={label}
-              type="number"
-              value={plan.rf[k]}
-              onChange={(v) =>
-                mutate((p) => ({ ...p, rf: { ...p.rf, [k]: v } }))
-              }
-            />
-          ))}
-        </div>
-        <label className="check">
+        <label>
           <input
             type="checkbox"
-            checked={heatmap}
-            onChange={(e) => setHeatmap(e.target.checked)}
+            checked={allFloors}
+            onChange={(e) => setAllFloors(e.target.checked)}
           />{" "}
-          Show prediction heatmap
+          All floors (otherwise the selected floor only)
         </label>
-        <div className="stat-row">
-          <div>
-            <strong>{predictions.length}</strong>
-            <small>Sample cells</small>
-          </div>
-          <div>
-            <strong>{coverage}%</strong>
-            <small>Covered cells</small>
-          </div>
-          <div>
-            <strong>{coveredArea.toFixed(1)} m²</strong>
-            <small>Estimated covered area</small>
-          </div>
-          <div>
-            <strong>
-              {Math.max(0, totalArea - coveredArea).toFixed(1)} m²
-            </strong>
-            <small>Estimated uncovered area</small>
-          </div>
-        </div>
-        <div className="legend">
-          {[
-            ["#2563eb", "Strong"],
-            ["#16a34a", "Good"],
-            ["#eab308", "Fair"],
-            ["#f97316", "Edge"],
-            ["#dc2626", "Uncovered"],
-          ].map(([c, n]) => (
-            <span key={n}>
-              <i style={{ background: c }} />
-              {n}
-            </span>
-          ))}
-        </div>
+        <label>
+          <input
+            type="checkbox"
+            checked={furniture}
+            onChange={(e) => setFurniture(e.target.checked)}
+          />{" "}
+          Include furniture as wooden boxes
+        </label>
+        <button onClick={exportScene} disabled={exportState?.busy}>
+          Export scene (.zip)
+        </button>
+        {exportState?.done && <p>{exportState.done}</p>}
+        {exportState?.error && <p className="error">{exportState.error}</p>}
+        {exportState?.warnings?.map((w) => (
+          <small key={w} style={{ display: "block" }}>
+            ⚠ {w}
+          </small>
+        ))}
       </section>
       <section className="panel">
         <h2>Network sources</h2>

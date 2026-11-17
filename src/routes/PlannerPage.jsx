@@ -13,10 +13,21 @@ import {
   bbox,
   inside,
   overlapWarnings,
+  nestedRoomNotes,
   pointsOf,
   resizePolygonPoints,
+  roomContents,
+  shiftRoomContents,
 } from "../utils/geometry.js";
-import { predict } from "../utils/prediction.js";
+import {
+  boundaryArea,
+  rotateBoundary,
+  rotateBuilding,
+  rotateFurniture,
+  rotateInteriorWall,
+  rotateRoom,
+  rotationLosesData,
+} from "../utils/rotate.js";
 import {
   readBuilding,
   readLogs,
@@ -25,7 +36,6 @@ import {
   downloadBuildingTemplate,
 } from "../services/imports.js";
 import { listSessions, loadSessions } from "../services/sessions.js";
-import { traceFloorImage } from "../services/floorTrace.js";
 import {
   getFloorLogs,
   getMeasuredArea,
@@ -36,8 +46,33 @@ import DesignPanel from "../components/panels/DesignPanel.jsx";
 import NetworkPanel from "../components/panels/NetworkPanel.jsx";
 import DataPanel from "../components/panels/DataPanel.jsx";
 import AlignmentPanel from "../components/panels/AlignmentPanel.jsx";
-import EditorMenu, { EditorQuickTools } from "../components/planner/EditorMenu.jsx";
+import EditorMenu, {
+  EditorQuickTools,
+  PredictionMenu,
+  DownloadImageButton,
+  LegendMenu,
+  ShowMenu,
+} from "../components/planner/EditorMenu.jsx";
+import { useRayTracedPrediction } from "../hooks/useRayTracedPrediction.js";
+import { useApOptimization } from "../hooks/useApOptimization.js";
+import { plotFileName, plotImageBlob } from "../utils/plotImage.js";
+import { downloadBlob } from "../utils/sceneExport.js";
+import {
+  getMap as getRtMap,
+  submitSimulation,
+  uploadScene,
+  waitForSimulation,
+} from "../services/simulation.js";
+import { COMPARED_BANDS, planForBand } from "../utils/bandVariants.js";
+import { mergeSharedWall, snapCollidingWalls } from "../utils/wallMerge.js";
+import {
+  defaultKpiFor,
+  kpisForKind,
+  networkKindOf,
+} from "../utils/indoorLogKpis.js";
+import { DEFAULT_LEGEND_SECTIONS } from "../components/planner/MapLegend.jsx";
 import PropertyMenu from "../components/planner/PropertyMenu.jsx";
+import WorkspaceFooter from "../components/planner/WorkspaceFooter.jsx";
 
 const defaultSource = (kind, p, floorId) => ({
   id: uid(),
@@ -134,11 +169,17 @@ export default function PlannerPage() {
     [saveState, setSaveState] = useState("Saved"),
     [busy, setBusy] = useState(false);
   const [heatmap, setHeatmap] = useState(false),
+    [heatmapOpacity, setHeatmapOpacity] = useState(0.8),
     [logsVisible, setLogsVisible] = useState(true),
     [logGrid, setLogGrid] = useState(false),
-    [metric, setMetric] = useState("rsrp"),
+    [metric, setMetric] = useState("rssi"),
+    [legendSections, setLegendSections] = useState(DEFAULT_LEGEND_SECTIONS),
+    [mapMode, setMapMode] = useState("prediction"),
+    [hiddenLayers, setHiddenLayers] = useState([]),
+    [collisionFocus, setCollisionFocus] = useState(null),
     [gridSize, setGridSize] = useState(1),
     [aggregation, setAggregation] = useState("mean");
+  const [zoom, setZoom] = useState(1);
   const [draftRooms, setDraftRooms] = useState(null),
     [draftWalls, setDraftWalls] = useState([]),
     [draftFurniture, setDraftFurniture] = useState([]),
@@ -165,6 +206,8 @@ export default function PlannerPage() {
       logsVisible,
       logGrid,
       metric,
+      legendSections,
+      hiddenLayers,
       gridSize,
       aggregation,
       snap,
@@ -182,6 +225,8 @@ export default function PlannerPage() {
     logsVisible,
     logGrid,
     metric,
+    legendSections,
+    hiddenLayers,
     gridSize,
     aggregation,
     snap,
@@ -224,7 +269,15 @@ export default function PlannerPage() {
       setHeatmap(Boolean(pref.heatmap));
       setLogsVisible(pref.logsVisible !== false);
       setLogGrid(Boolean(pref.logGrid));
-      setMetric(pref.metric || "rsrp");
+      setMetric(pref.metric || "rssi");
+      setHiddenLayers(
+        Array.isArray(pref.hiddenLayers) ? pref.hiddenLayers : [],
+      );
+      setLegendSections(
+        Array.isArray(pref.legendSections)
+          ? pref.legendSections
+          : DEFAULT_LEGEND_SECTIONS,
+      );
       setGridSize(num(pref.gridSize, 1));
       setAggregation(pref.aggregation || "mean");
       setSnap(pref.snap !== false);
@@ -263,13 +316,138 @@ export default function PlannerPage() {
     rooms = plan.rooms.filter((r) => r.floorId === floorId),
     sources = plan.sources.filter((s) => s.floorId === floorId),
     floor = plan.floors.find((f) => f.id === floorId);
-  const predictions = useMemo(() => predict(plan, floorId), [plan, floorId]),
+  // Wi-Fi shows RSSI / DL / UL throughput; cellular shows the other KPIs.
+  const selectedSource =
+    selected?.type === "source"
+      ? plan.sources.find((s) => s.id === selected.id)
+      : null;
+  const networkKind = networkKindOf(sources, selectedSource);
+  const kpiOptions = useMemo(() => kpisForKind(networkKind), [networkKind]);
+  useEffect(() => {
+    if (!kpiOptions.some((k) => k.key === metric))
+      setMetric(
+        kpiOptions.some((k) => k.key === defaultKpiFor(networkKind))
+          ? defaultKpiFor(networkKind)
+          : kpiOptions[0].key,
+      );
+  }, [kpiOptions, metric, networkKind]);
+  const [rt, setRt] = useState({ maps: {}, active: false });
+  // moving a room also moves what is inside it (furniture, APs, inner walls, inner rooms)
+  const [moveWithContents, setMoveWithContents] = useState(true);
+  // The prediction uses the same threshold bands as the measurement logs. It
+  // is a dBm value (RSSI, otherwise RSRP) or the SNR in dB.
+  const predictionMetric =
+    metric === "snr" ? "snr" : metric === "rssi" ? "rssi" : "rsrp";
+  const predictionRanges = useMemo(
+    () => getMetricRanges(plan, predictionMetric),
+    [plan, predictionMetric],
+  );
+  // "weak" always means weak signal strength in dBm, whichever KPI is shown
+  const weakRanges = useMemo(
+    () => getMetricRanges(plan, predictionMetric === "rsrp" ? "rsrp" : "rssi"),
+    [plan, predictionMetric],
+  );
+  const weakBelowDbm = Number(weakRanges[0]?.max ?? -100);
+  const prediction = useRayTracedPrediction({
+    plan,
+    mutate,
+    rt,
+    setRt,
+    setHeatmap,
+    heatmap,
+    showOnMap: () => setMapMode("prediction"),
+    weakBelowDbm,
+  });
+  const optimization = useApOptimization({
+    plan, mutate, setHeatmap,
+    noiseSettings: prediction.rtSettings,
+    setNoiseSettings: prediction.setRtSettings,
+  });
+  const optThreshold = optimization.opt?.threshold;
+  // The map shows either the prediction (A) or the optimiser result (B). It
+  // changes only when you open Run prediction / Optimise APs or press the A/B
+  // tabs, never because something was selected or moved.
+  const optOnMap = mapMode === "optimise";
+  const heatRanges = useMemo(
+    () =>
+      optOnMap &&
+      optimization.opt &&
+      optimization.show !== "off" &&
+      optimization.view === "coverage"
+        ? [
+            { min: -Infinity, max: optThreshold, color: "#dc2626" },
+            { min: optThreshold, max: Infinity, color: "#16a34a" },
+          ]
+        : predictionRanges,
+    [
+      optOnMap,
+      optimization.opt,
+      optimization.show,
+      optimization.view,
+      optThreshold,
+      predictionRanges,
+    ],
+  );
+  const predictions = useMemo(() => {
+      const optCells = optOnMap ? optimization.heatCells(floorId, {
+        metric: predictionMetric,
+        snrThreshold: Number(predictionRanges[0]?.max ?? 10),
+      }) : null;
+      if (optCells)
+        return optCells.map((cell) => ({
+          ...cell,
+          thresholdDbm: cell.thresholdDbm ?? optThreshold,
+          ranges: heatRanges,
+        }));
+      // the one model: the ray-traced result (an older one while a new run is
+      // under way); empty until a prediction has been run
+      const showSnr = predictionMetric === "snr";
+      const snrWeak = Number(predictionRanges[0]?.max ?? 10);
+      const cells =
+        rt.active && rt.maps[floorId]
+          ? rt.maps[floorId].map((cell) =>
+              showSnr
+                ? {
+                    ...cell,
+                    // the heatmap colours the `dbm` value: here the SNR in dB;
+                    // a cell no signal reaches has the lowest SNR
+                    dbm: Number.isFinite(cell.snr) ? cell.snr : -20,
+                    thresholdDbm: snrWeak,
+                    covered: Number.isFinite(cell.snr) && cell.snr >= snrWeak,
+                  }
+                : {
+                    ...cell,
+                    thresholdDbm: weakBelowDbm,
+                    covered: cell.dbm >= weakBelowDbm,
+                  },
+            )
+          : [];
+      return cells.map((cell) => ({ ...cell, ranges: predictionRanges }));
+    }, [
+      plan,
+      floorId,
+      rt,
+      weakBelowDbm,
+      predictionMetric,
+      predictionRanges,
+      optOnMap,
+      optimization.opt,
+      optimization.show,
+      optimization.view,
+      heatRanges,
+      optThreshold,
+    ]),
     warnings = useMemo(() => overlapWarnings(rooms), [rooms]),
+    nestedNotes = useMemo(() => nestedRoomNotes(rooms), [rooms]),
     totalArea = rooms.reduce((s, r) => s + areaOf(r), 0),
     coveredArea = Math.min(
       totalArea,
-      predictions.filter((p) => p.covered).length *
-        num(plan.rf.gridStepM, 1) ** 2,
+      predictions
+        .filter((p) => p.covered)
+        .reduce(
+          (sum, p) => sum + (p.step || num(plan.rf.gridStepM, 1)) ** 2,
+          0,
+        ),
     ),
     coverage = predictions.length
       ? Math.round(
@@ -277,13 +455,17 @@ export default function PlannerPage() {
             predictions.length,
         )
       : 0;
-  const carpetArea =
-    plan.property?.carpetAreaM2 == null
-      ? plan.rooms.reduce((sum, room) => sum + areaOf(room), 0)
-      : num(
-          plan.property.carpetAreaM2,
-          plan.rooms.reduce((sum, room) => sum + areaOf(room), 0),
-        );
+  const boundaryTotal = (plan.boundaries || []).reduce(
+    (sum, b) => sum + areaOf({ polygonPoints: b.points, shape: "polygon" }),
+    0,
+  );
+  const roomTotal = plan.rooms.reduce((sum, room) => sum + areaOf(room), 0);
+  const carpetFit = Boolean(plan.property?.carpetFit) && boundaryTotal > 0;
+  const carpetArea = carpetFit
+    ? boundaryTotal
+    : plan.property?.carpetAreaM2 == null
+      ? roomTotal
+      : num(plan.property.carpetAreaM2, roomTotal);
   const obj =
     selected?.type === "room"
       ? plan.rooms.find((x) => x.id === selected.id)
@@ -297,7 +479,9 @@ export default function PlannerPage() {
               ? plan.furniture.find((x) => x.id === selected.id)
               : selected?.type === "source"
                 ? plan.sources.find((x) => x.id === selected.id)
-                : null;
+                : selected?.type === "boundary"
+                  ? (plan.boundaries || []).find((x) => x.id === selected.id)
+                  : null;
   const listKey = {
     room: "rooms",
     door: "doors",
@@ -305,10 +489,29 @@ export default function PlannerPage() {
     wall: "interiorWalls",
     furniture: "furniture",
     source: "sources",
+    boundary: "boundaries",
   };
   const patchObj = (key, value, growthDirection = 1) => {
     if (!selected) return;
     const list = listKey[selected.type];
+    if (
+      selected.type === "room" &&
+      moveWithContents &&
+      (key === "x" || key === "z")
+    ) {
+      mutate((p) => {
+        const room = p.rooms.find((r) => r.id === selected.id);
+        const delta = Number(value) - num(room?.[key]);
+        return room && Number.isFinite(delta) && delta !== 0
+          ? shiftRoomContents(
+              p,
+              room,
+              key === "x" ? delta : 0,
+              key === "z" ? delta : 0,
+            )
+          : p;
+      });
+    }
     mutate((p) => ({
       ...p,
       [list]: p[list].map((x) => {
@@ -449,6 +652,8 @@ export default function PlannerPage() {
     setPanelMode("selection");
   };
   const openRightPanel = (mode) => {
+    if (mode === "prediction") setMapMode("prediction");
+    if (mode === "optimize") setMapMode("optimise");
     if (tab !== "design") setTab("design");
     setPanelMode(mode);
   };
@@ -497,6 +702,42 @@ export default function PlannerPage() {
     setSelected(null);
     setPanelMode("selection");
   };
+  // Empties the selected floor (also the only one): rooms, walls, openings, furniture, access points, the building
+  // boundary and the imported picture. The floor itself and its measured logs stay.
+  const clearFloor = () => {
+    if (
+      !window.confirm(
+        `Remove everything on ${floor?.name}: rooms, walls, doors, windows, furniture, access points, boundary and the imported picture? Measured logs are kept.`,
+      )
+    )
+      return;
+    mutate((p) => {
+      const gone = new Set(
+        p.rooms.filter((r) => r.floorId === floorId).map((r) => r.id),
+      );
+      const next = { ...p, images: { ...p.images } };
+      delete next.images[floorId];
+      for (const key of [
+        "rooms",
+        "doors",
+        "windows",
+        "interiorWalls",
+        "furniture",
+        "sources",
+        "boundaries",
+      ])
+        if (Array.isArray(p[key]))
+          next[key] = p[key].filter((x) => x.floorId !== floorId);
+      next.wallTypes = Object.fromEntries(
+        Object.entries(p.wallTypes || {}).filter(
+          ([k]) => !gone.has(k.split(":")[0]),
+        ),
+      );
+      return next;
+    });
+    setSelected(null);
+    setPanelMode("selection");
+  };
   const place = (kind, p) => {
     if (kind === "select") return;
     if (kind === "rectangle" || kind === "circle" || kind === "polygon") {
@@ -536,6 +777,22 @@ export default function PlannerPage() {
       mutate((old) => ({ ...old, rooms: [...old.rooms, room] }));
       selectEntity({ type: "room", id: room.id });
       if (kind === "rectangle" || kind === "polygon") setTool("select");
+    }
+    if (kind === "boundary") {
+      const boundary = {
+        id: uid(),
+        floorId,
+        name: "Building boundary",
+        points: p.points,
+        height: 3,
+        material: "concrete",
+      };
+      mutate((old) => ({
+        ...old,
+        boundaries: [...(old.boundaries || []), boundary],
+      }));
+      selectEntity({ type: "boundary", id: boundary.id });
+      setTool("select");
     }
     if (kind === "cellular" || kind === "wifi") {
       const s = defaultSource(kind, p, floorId);
@@ -606,7 +863,8 @@ export default function PlannerPage() {
           west: Math.abs(p.x - b.minX),
           east: Math.abs(p.x - b.maxX),
         },
-        side = wallPlacement?.side ||
+        side =
+          wallPlacement?.side ||
           Object.keys(dist).sort((a, b) => dist[a] - dist[b])[0],
         offset = Math.max(
           0,
@@ -635,56 +893,121 @@ export default function PlannerPage() {
       setSelected({ type: kind, id: o.id });
     }
   };
+  const confirmRotation = (roomIds, deg) =>
+    !rotationLosesData(plan, roomIds, deg) ||
+    window.confirm(
+      "Turning a rectangular room by an angle that is not a multiple of 90° makes it a polygon. Its doors, windows and per-side wall materials will be removed. Continue?",
+    );
+  const rotateSelected = (deg) => {
+    if (!selected) return;
+    if (selected.type === "room") {
+      const room = plan.rooms.find((r) => r.id === selected.id);
+      if (!room) return;
+      const ids = [
+        room.id,
+        ...(moveWithContents ? roomContents(plan, room).rooms : []),
+      ];
+      if (!confirmRotation(ids, deg)) return;
+      mutate((p) => rotateRoom(p, selected.id, deg, moveWithContents));
+    } else if (selected.type === "furniture")
+      mutate((p) => rotateFurniture(p, selected.id, deg));
+    else if (selected.type === "wall")
+      mutate((p) => rotateInteriorWall(p, selected.id, deg));
+    else if (selected.type === "boundary") {
+      const b = (plan.boundaries || []).find((x) => x.id === selected.id);
+      if (!b) return;
+      const ids = moveWithContents
+        ? roomContents(plan, boundaryArea(b)).rooms
+        : [];
+      if (!confirmRotation(ids, deg)) return;
+      mutate((p) => rotateBoundary(p, selected.id, deg, moveWithContents));
+    }
+  };
+  const rotateWholeBuilding = (deg) => {
+    if (
+      !confirmRotation(
+        plan.rooms.map((r) => r.id),
+        deg,
+      )
+    )
+      return;
+    mutate((p) => rotateBuilding(p, deg));
+  };
   const move = (type, id, dx, dz) => {
     const key = listKey[type];
-    mutate((p) => ({
-      ...p,
-      [key]: p[key].map((x) =>
-        x.id === id
-          ? type === "wall"
-            ? {
-                ...x,
-                x1: +x.x1 + dx,
-                x2: +x.x2 + dx,
-                z1: +x.z1 + dz,
-                z2: +x.z2 + dz,
-              }
-            : type === "door" || type === "window"
+    mutate((plan0) => {
+      const carried =
+        (type === "room" || type === "boundary") && moveWithContents
+          ? (() => {
+              const area =
+                type === "room"
+                  ? plan0.rooms.find((r) => r.id === id)
+                  : (() => {
+                      const b = (plan0.boundaries || []).find(
+                        (x) => x.id === id,
+                      );
+                      return b && boundaryArea(b);
+                    })();
+              return area ? shiftRoomContents(plan0, area, dx, dz) : plan0;
+            })()
+          : plan0;
+      const p = carried;
+      return {
+        ...p,
+        [key]: p[key].map((x) =>
+          x.id === id
+            ? type === "boundary"
               ? {
                   ...x,
-                  offset: (() => {
-                    const room = p.rooms.find((item) => item.id === x.roomId);
-                    const wallLength = room
-                      ? ["north", "south"].includes(x.wallSide)
-                        ? bbox(room).maxX - bbox(room).minX
-                        : bbox(room).maxZ - bbox(room).minZ
-                      : Infinity;
-                    return Math.max(
-                      0,
-                      Math.min(
-                        wallLength - Number(x.width || 0),
-                        num(x.offset) +
-                          (x.wallSide === "north" || x.wallSide === "south"
-                            ? dx
-                            : dz),
-                      ),
-                    );
-                  })(),
+                  points: x.points.map((q) => ({ x: q.x + dx, z: q.z + dz })),
                 }
-              : type === "room" && x.shape === "polygon"
+              : type === "wall"
                 ? {
                     ...x,
-                    x: +x.x + dx,
-                    z: +x.z + dz,
-                    polygonPoints: pointsOf(x).map((point) => ({
-                      x: point.x + dx,
-                      z: point.z + dz,
-                    })),
+                    x1: +x.x1 + dx,
+                    x2: +x.x2 + dx,
+                    z1: +x.z1 + dz,
+                    z2: +x.z2 + dz,
                   }
-                : { ...x, x: +x.x + dx, z: +x.z + dz }
-          : x,
-      ),
-    }));
+                : type === "door" || type === "window"
+                  ? {
+                      ...x,
+                      offset: (() => {
+                        const room = p.rooms.find(
+                          (item) => item.id === x.roomId,
+                        );
+                        const wallLength = room
+                          ? ["north", "south"].includes(x.wallSide)
+                            ? bbox(room).maxX - bbox(room).minX
+                            : bbox(room).maxZ - bbox(room).minZ
+                          : Infinity;
+                        return Math.max(
+                          0,
+                          Math.min(
+                            wallLength - Number(x.width || 0),
+                            num(x.offset) +
+                              (x.wallSide === "north" || x.wallSide === "south"
+                                ? dx
+                                : dz),
+                          ),
+                        );
+                      })(),
+                    }
+                  : type === "room" && x.shape === "polygon"
+                    ? {
+                        ...x,
+                        x: +x.x + dx,
+                        z: +x.z + dz,
+                        polygonPoints: pointsOf(x).map((point) => ({
+                          x: point.x + dx,
+                          z: point.z + dz,
+                        })),
+                      }
+                    : { ...x, x: +x.x + dx, z: +x.z + dz }
+            : x,
+        ),
+      };
+    });
   };
   const movePolygonPart = (roomId, vertexIndex, dx, dz, mode) => {
     mutate((p) => ({
@@ -749,7 +1072,10 @@ export default function PlannerPage() {
       const parsed = await readLogs(file, floorId, plan.alignment);
       mutate((p) => ({
         ...p,
-        logs: [...p.logs, ...parsed.logs],
+        logs: [
+          ...p.logs,
+          ...parsed.logs.map((l) => ({ ...l, source: file.name })),
+        ],
         thresholds: { ...p.thresholds, ...parsed.zipThresholds },
       }));
       setMessage(
@@ -786,30 +1112,8 @@ export default function PlannerPage() {
       setDraftMethod(found.length ? "Quick scan" : null);
       setMessage(
         found.length
-          ? `Quick scan found ${found.length} possible enclosed rooms. For the full layout, click Trace full plan with AI.`
-          : "Quick scan found no reliable enclosed rooms. Click Trace full plan with AI to find spaces, walls, and desk groups.",
-      );
-    } catch (e) {
-      setMessage(e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const traceImage = async () => {
-    const image = plan.images[floorId];
-    if (!image) return;
-    setBusy(true);
-    try {
-      const trace = await traceFloorImage(image, floorId);
-      setDraftRooms(trace.rooms);
-      setDraftWalls(trace.walls);
-      setDraftFurniture(trace.furniture);
-      setDraftFloorId(floorId);
-      setDraftMethod("AI trace");
-      setView("2d");
-      setTab("design");
-      setMessage(
-        `AI proposed ${trace.rooms.length} spaces, ${trace.walls.length} walls, and ${trace.furniture.length} desk groups. Review the overlay, then apply.`,
+          ? `Quick scan found ${found.length} possible enclosed rooms.`
+          : "Quick scan found no reliable enclosed rooms.",
       );
     } catch (e) {
       setMessage(e.message);
@@ -913,6 +1217,237 @@ export default function PlannerPage() {
     }));
     setMessage("Geographic logs projected onto the plan.");
   };
+  // A room that is really the building outline becomes the boundary: exterior
+  // wall and one floor slab; rooms inside it stay as they are.
+  const convertRoomToBoundary = (roomId) => {
+    const room = plan.rooms.find((r) => r.id === roomId);
+    if (!room) return;
+    const boundary = {
+      id: uid(),
+      floorId: room.floorId,
+      name: "Building boundary",
+      points: pointsOf(room).map((p) => ({ x: p.x, z: p.z })),
+      height: Number(room.height) || 3,
+      material: room.material || "concrete",
+    };
+    mutate((p) => ({
+      ...p,
+      rooms: p.rooms.filter((r) => r.id !== roomId),
+      boundaries: [...(p.boundaries || []), boundary],
+    }));
+    selectEntity({ type: "boundary", id: boundary.id });
+  };
+  // Panel position fields: top-left of the boundary's bounding box.
+  const boundaryCorner = (b) => ({
+    x: Math.min(...b.points.map((q) => q.x)),
+    z: Math.min(...b.points.map((q) => q.z)),
+  });
+  const moveBoundaryTo = (id, axis, value) => {
+    const target = Number(value);
+    if (!Number.isFinite(target)) return;
+    // the shift is worked out from the plan being updated, not from a render
+    mutate((p) => {
+      const b = (p.boundaries || []).find((x) => x.id === id);
+      if (!b) return p;
+      const delta = target - boundaryCorner(b)[axis];
+      if (!delta) return p;
+      const dx = axis === "x" ? delta : 0,
+        dz = axis === "z" ? delta : 0;
+      const carried = moveWithContents
+        ? shiftRoomContents(p, boundaryArea(b), dx, dz)
+        : p;
+      return {
+        ...carried,
+        boundaries: carried.boundaries.map((x) =>
+          x.id === id
+            ? {
+                ...x,
+                points: x.points.map((q) => ({ x: q.x + dx, z: q.z + dz })),
+              }
+            : x,
+        ),
+      };
+    });
+  };
+  // Back to an ordinary room (the reverse of "Use as building boundary"). An
+  // upright four-corner outline becomes a rectangle room, anything else a polygon.
+  const convertBoundaryToRoom = (id) => {
+    const b = (plan.boundaries || []).find((x) => x.id === id);
+    if (!b) return;
+    const xs = b.points.map((q) => q.x),
+      zs = b.points.map((q) => q.z);
+    const x = Math.min(...xs),
+      z = Math.min(...zs);
+    const near = (a, c) => Math.abs(a - c) < 1e-6;
+    const upright =
+      b.points.length === 4 &&
+      b.points.every(
+        (q) =>
+          (near(q.x, x) || near(q.x, Math.max(...xs))) &&
+          (near(q.z, z) || near(q.z, Math.max(...zs))),
+      );
+    const room = {
+      id: uid(),
+      floorId: b.floorId,
+      name: `Room ${plan.rooms.length + 1}`,
+      shape: upright ? "rectangle" : "polygon",
+      x,
+      z,
+      width: Math.max(...xs) - x,
+      depth: Math.max(...zs) - z,
+      height: Number(b.height) || 3,
+      material: b.material || "drywall",
+      ...(upright ? {} : { polygonPoints: b.points.map((q) => ({ ...q })) }),
+    };
+    mutate((p) => ({
+      ...p,
+      boundaries: p.boundaries.filter((x2) => x2.id !== id),
+      rooms: [...p.rooms, room],
+    }));
+    selectEntity({ type: "room", id: room.id });
+  };
+  const mergeWall = (collision, material) => {
+    mutate((p) => mergeSharedWall(p, collision, material));
+    setCollisionFocus(null);
+    setMessage("Walls merged into one wall.");
+  };
+  const snapWalls = (collision) => {
+    mutate((p) => snapCollidingWalls(p, collision));
+    setCollisionFocus(null);
+    setMessage("Walls snapped together and merged into one wall.");
+  };
+  const [imageBusy, setImageBusy] = useState(false);
+  const downloadPlot = async () => {
+    setImageBusy(true);
+    try {
+      const blob = await plotImageBlob({
+        title: [projectName, floor?.name].filter(Boolean).join(" · "),
+      });
+      downloadBlob(blob, plotFileName(projectName, floor?.name));
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setImageBusy(false);
+    }
+  };
+  const [reportBusy, setReportBusy] = useState(false);
+  const downloadReport = async () => {
+    setReportBusy(true);
+    try {
+      const { buildReport } = await import("../utils/reportBuilder.js");
+      const { loadReportLogos } = await import("../utils/reportLogos.js");
+      const blob = await buildReport({
+        logos: await loadReportLogos(),
+        snrRanges: getMetricRanges(plan, "snr"),
+        plan,
+        projectName,
+        rt,
+        opt: optimization.opt,
+        ranges: weakRanges, // signal-strength bands (dBm), whatever KPI the legend shows
+        thresholdDbm: weakBelowDbm,
+        getMap: (jobId, file) => getRtMap(jobId, file),
+        onProgress: (text) => setMessage(`Building report: ${text}…`),
+      });
+      downloadBlob(
+        blob,
+        `${(projectName || "plan").replace(/[^\w.-]+/g, "_")}-wifi-report.docx`,
+      );
+      setMessage("Report downloaded.");
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setReportBusy(false);
+    }
+  };
+  // 2.4 GHz vs 5 GHz report: the same APs predicted on each band (two runs, the
+  // service reuses saved ones), then one Word report that compares them.
+  const [compareBusy, setCompareBusy] = useState(false);
+  const downloadComparison = async () => {
+    if (!plan.sources.some((s) => s.kind === "wifi")) {
+      setMessage("Place Wi-Fi access points first: the comparison uses them.");
+      return;
+    }
+    setCompareBusy(true);
+    try {
+      const [{ buildSceneZip }, { buildBandComparisonReport }] =
+        await Promise.all([
+          import("../utils/sceneExport.js"),
+          import("../utils/reportCompare.js"),
+        ]);
+      const runs = {};
+      for (const band of COMPARED_BANDS) {
+        setMessage(`Comparison: preparing the ${band} GHz prediction…`);
+        const { blob } = await buildSceneZip(planForBand(plan, band), {});
+        const { sceneId } = await uploadScene(blob);
+        const job = await submitSimulation(sceneId, {
+          ...prediction.rtSettings,
+          receiverGainDbi: Number(plan.rf?.rxGainDbi) || 0,
+        });
+        const status = await waitForSimulation(job.id, {
+          onStatus: (phase) =>
+            setMessage(`Comparison: ${band} GHz prediction · ${phase}…`),
+        });
+        runs[band] = { jobId: job.id, result: status.result };
+      }
+      const { loadReportLogos } = await import("../utils/reportLogos.js");
+      const blob = await buildBandComparisonReport({
+        logos: await loadReportLogos(),
+        snrRanges: getMetricRanges(plan, "snr"),
+        plan,
+        projectName,
+        runs,
+        ranges: weakRanges, // signal-strength bands (dBm), whatever KPI the legend shows
+        designThr: Number.isFinite(optimization.opt?.threshold)
+          ? optimization.opt.threshold
+          : weakBelowDbm,
+        getMap: (jobId, file) => getRtMap(jobId, file),
+        onProgress: (text) => setMessage(`Building comparison report: ${text}…`),
+      });
+      downloadBlob(
+        blob,
+        `${(projectName || "plan").replace(/[^\w.-]+/g, "_")}-2.4-vs-5GHz-report.docx`,
+      );
+      setMessage("Comparison report downloaded.");
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setCompareBusy(false);
+    }
+  };
+  const setSelectedFloor = (id) => {
+    mutate((p) => ({ ...p, selectedFloorId: id }));
+    setSelected(null);
+  };
+  const overlay = useMemo(() => {
+    const o = optimization;
+    const shown = o.opt && o.show !== "off" && optOnMap;
+    return {
+      recommended: shown
+        ? o.opt.result.recommendations.filter((r) => r.floorId === floorId)
+        : [],
+      weakZones: shown
+        ? o.opt.result.weakZones.filter((z) => z.floorId === floorId)
+        : [],
+      focus: collisionFocus,
+      candidates:
+        o.previewOn && o.candidates
+          ? {
+              valid: o.candidates.valid.filter((c) => c.floorId === floorId),
+              rejected: o.candidates.rejected.filter(
+                (c) => c.floorId === floorId,
+              ),
+            }
+          : null,
+    };
+  }, [
+    optOnMap,
+    optimization.opt,
+    optimization.show,
+    optimization.previewOn,
+    optimization.candidates,
+    floorId,
+    collisionFocus,
+  ]);
   const panelProps = {
     tool,
     setTool,
@@ -932,16 +1467,73 @@ export default function PlannerPage() {
     setPanelMode,
     carpetArea,
     isCustomCarpetArea: plan.property?.carpetAreaM2 != null,
+    carpetFit,
+    boundaryAreaM2: boundaryTotal,
+    carpetLengthM: plan.property?.carpetLengthM ?? null,
+    carpetWidthM: plan.property?.carpetWidthM ?? null,
+    // typing the area directly drops the length x width and the boundary fit
     onCarpetAreaChange: (value) =>
       mutate((p) => ({
         ...p,
-        property: { ...p.property, carpetAreaM2: value },
+        property: {
+          ...p.property,
+          carpetAreaM2: value,
+          carpetLengthM: null,
+          carpetWidthM: null,
+          carpetFit: false,
+        },
+      })),
+    onCarpetSize: (length, width) =>
+      mutate((p) => {
+        const l = length === "" || length == null ? null : Number(length);
+        const w = width === "" || width == null ? null : Number(width);
+        return {
+          ...p,
+          property: {
+            ...p.property,
+            carpetLengthM: l,
+            carpetWidthM: w,
+            carpetFit: false,
+            carpetAreaM2:
+              l > 0 && w > 0
+                ? Math.round(l * w * 100) / 100
+                : (p.property?.carpetAreaM2 ?? null),
+          },
+        };
+      }),
+    onCarpetFitBoundary: () =>
+      mutate((p) => ({
+        ...p,
+        property: {
+          ...p.property,
+          carpetFit: true,
+          carpetAreaM2: null,
+          carpetLengthM: null,
+          carpetWidthM: null,
+        },
       })),
     onCarpetAreaReset: () =>
       mutate((p) => ({
         ...p,
-        property: { ...p.property, carpetAreaM2: null },
+        property: {
+          ...p.property,
+          carpetAreaM2: null,
+          carpetLengthM: null,
+          carpetWidthM: null,
+          carpetFit: false,
+        },
       })),
+    moveWithContents,
+    setMoveWithContents,
+    mapMode,
+    setMapMode,
+    hiddenLayers,
+    setHiddenLayers,
+    mergeWall,
+    snapWalls,
+    setCollisionFocus,
+    rotateSelected,
+    rotateWholeBuilding,
     onStaticChange: (value) =>
       mutate((p) => ({
         ...p,
@@ -954,7 +1546,22 @@ export default function PlannerPage() {
     move,
     movePolygonPart,
     predictions,
+    predictionMetric,
+    predictionRanges,
+    weakBelowDbm,
+    rt,
+    setRt,
+    prediction,
+    nestedNotes,
+    convertRoomToBoundary,
+    convertBoundaryToRoom,
+    moveBoundaryTo,
+    optimization,
+    heatRanges,
+    overlay,
+    setSelectedFloor,
     heatmap,
+    heatmapOpacity,
     logsVisible,
     logGrid,
     metric,
@@ -967,6 +1574,7 @@ export default function PlannerPage() {
     deleteObj,
     floor,
     deleteFloor,
+    clearFloor,
     warnings,
     setHeatmap,
     coverage,
@@ -979,7 +1587,7 @@ export default function PlannerPage() {
     imageWidth,
     setImageWidth,
     importImage,
-    traceImage,
+    setMessage,
     busy,
     draftRooms,
     setDraftRooms,
@@ -997,6 +1605,8 @@ export default function PlannerPage() {
     browseSessions,
     availableSessions,
     setMetric,
+    kpiOptions,
+    legendSections,
     setLogsVisible,
     setLogGrid,
     setGridSize,
@@ -1006,6 +1616,8 @@ export default function PlannerPage() {
     sampledArea,
     metricRanges,
     applyAlignment,
+    zoom,
+    setZoom,
   };
   if (!project)
     return <div className="empty">{message || "Loading project..."}</div>;
@@ -1014,7 +1626,11 @@ export default function PlannerPage() {
       <div className="workspace">
         <aside className="sidebar">
           <div className="sidebar-project">
-            <button className="sidebar-back-button" onClick={back} aria-label="Back to projects">
+            <button
+              className="sidebar-back-button"
+              onClick={back}
+              aria-label="Back to projects"
+            >
               <span aria-hidden="true">&#x2190;</span> Projects
             </button>
             <input
@@ -1145,6 +1761,144 @@ export default function PlannerPage() {
                 active={panelMode === "property"}
                 onOpen={() => openRightPanel("property")}
               />
+              <PredictionMenu
+                active={panelMode === "prediction" || panelMode === "optimize"}
+                onOpen={() =>
+                  openRightPanel(
+                    panelMode === "optimize" ? "optimize" : "prediction",
+                  )
+                }
+              />
+              <label
+                className="prediction-opacity"
+                title="Opacity of the prediction image"
+              >
+                <span>Opacity {Math.round(heatmapOpacity * 100)}%</span>
+                <input
+                  type="range"
+                  min="10"
+                  max="100"
+                  step="5"
+                  value={Math.round(heatmapOpacity * 100)}
+                  onChange={(e) =>
+                    setHeatmapOpacity(Number(e.target.value) / 100)
+                  }
+                />
+              </label>
+              <ShowMenu
+                hiddenLayers={hiddenLayers}
+                onHiddenLayers={setHiddenLayers}
+                logCount={plan.logs.length}
+                onManageLogs={() => {
+                  setSelected(null);
+                  setPanelMode("selection");
+                }}
+                overlays={[
+                  {
+                    id: "heatmap",
+                    label: "Signal heatmap",
+                    checked: heatmap,
+                    onChange: setHeatmap,
+                    defaultOn: false,
+                  },
+                  {
+                    id: "logs",
+                    label: "Measured log points",
+                    checked: logsVisible,
+                    onChange: setLogsVisible,
+                    defaultOn: true,
+                  },
+                  {
+                    id: "loggrid",
+                    label: "Logs aggregated to grid",
+                    checked: logGrid,
+                    onChange: setLogGrid,
+                    defaultOn: false,
+                  },
+                  {
+                    id: "rn",
+                    label: "Room names",
+                    checked: showRoomNames,
+                    onChange: setShowRoomNames,
+                    defaultOn: true,
+                  },
+                  {
+                    id: "fn",
+                    label: "Furniture names",
+                    checked: showFurnitureNames,
+                    onChange: setShowFurnitureNames,
+                    defaultOn: true,
+                  },
+                  {
+                    id: "wn",
+                    label: "Wi-Fi / cellular names",
+                    checked: showWifiNames,
+                    onChange: setShowWifiNames,
+                    defaultOn: true,
+                  },
+                ]}
+              />
+              <LegendMenu
+                sections={legendSections}
+                onChange={setLegendSections}
+              />
+              <DownloadImageButton onDownload={downloadPlot} busy={imageBusy} />
+              <button
+                className="download-image-trigger icon-button"
+                type="button"
+                disabled={reportBusy}
+                aria-label="Download Word report"
+                title={
+                  reportBusy
+                    ? "Building report…"
+                    : "Download Word report (.docx): each AP's prediction, the combined prediction, optimised APs and the APs needed for full coverage"
+                }
+                onClick={downloadReport}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                  <path d="M14 3v5h5" />
+                  <path d="M9 13h6M9 17h6" />
+                </svg>
+              </button>
+              <button
+                className="download-image-trigger icon-button"
+                type="button"
+                disabled={compareBusy || reportBusy}
+                aria-label="Download 2.4 GHz vs 5 GHz comparison report"
+                title={
+                  compareBusy
+                    ? "Building the comparison report (predicting both bands)…"
+                    : "Download the 2.4 GHz vs 5 GHz comparison report (.docx): the same APs predicted on each band"
+                }
+                onClick={downloadComparison}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                  <path d="M14 3v5h5" />
+                  <path d="M9 18v-4M12 18v-7M15 18v-5" />
+                </svg>
+              </button>
               <div className="top-actions">
                 <span
                   className={`save-state ${saveState === "Save failed" ? "error" : ""}`}
@@ -1155,24 +1909,39 @@ export default function PlannerPage() {
             </header>
           )}
           <main className={`main ${tab === "design" ? "main-editor" : ""}`}>
-          {message && (
-            <div className="notice" role="status">
-              <span>{message}</span>
-              <button onClick={() => setMessage("")}>×</button>
-            </div>
-          )}
-          {busy && (
-            <div className="notice" role="status">
-              Processing floor plan or session…
-            </div>
-          )}
-          {tab === "design" && <DesignPanel {...panelProps} />}
-          {tab === "network" && <NetworkPanel {...panelProps} />}
-          {tab === "data" && <DataPanel {...panelProps} />}
-          {tab === "alignment" && <AlignmentPanel {...panelProps} />}
+            {message && (
+              <div className="notice" role="status">
+                <span>{message}</span>
+                <button onClick={() => setMessage("")}>×</button>
+              </div>
+            )}
+            {busy && (
+              <div className="notice" role="status">
+                Processing floor plan or session…
+              </div>
+            )}
+            {tab === "design" && <DesignPanel {...panelProps} />}
+            {tab === "network" && <NetworkPanel {...panelProps} />}
+            {tab === "data" && <DataPanel {...panelProps} />}
+            {tab === "alignment" && <AlignmentPanel {...panelProps} />}
           </main>
         </div>
       </div>
+      <WorkspaceFooter
+        view={view}
+        onViewChange={setView}
+        outputBand={optOnMap && optimization.show !== "off" ? optimization.opt?.settingsUsed.band : null}
+        outputBands={Object.keys(optimization.altRuns).sort((a, b) => Number(a) - Number(b))}
+        onBandChange={optimization.chooseBand}
+        bandBusy={optimization.busy}
+        zoom={zoom}
+        onZoom={setZoom}
+        floorName={plan.floors.find((f) => f.id === floorId)?.name}
+        rooms={rooms.length}
+        area={totalArea}
+        sources={sources.length}
+        saveState={saveState}
+      />
     </div>
   );
 }

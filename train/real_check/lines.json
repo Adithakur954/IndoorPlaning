@@ -1,0 +1,9 @@
+{
+  "note": "Wall lines traced on coworking1.jpeg (outputs/office-plan-trace-20261016/trace_review.svg), same pixel grid. Coarse reference: doors/openings make 100% unreachable. 8 Wi-Fi markers are visible in the plan. This plan is NOT part of the training data.",
+  "ap_expected": 8,
+  "lines": {
+    "outer top": [80, 30, 1493, 30], "outer left": [80, 30, 80, 1344], "outer right": [1493, 30, 1493, 1344],
+    "outer bottom": [80, 1344, 1493, 1344], "part y=472": [80, 472, 1372, 472],
+    "part y=843": [80, 843, 1373, 843], "part x=1375": [1375, 175, 1375, 580]
+  }
+}

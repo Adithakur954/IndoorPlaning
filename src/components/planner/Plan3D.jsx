@@ -1,9 +1,11 @@
-import React, { useRef, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { Html, OrbitControls, Grid } from "@react-three/drei";
 import * as THREE from "three";
-import { pointsOf, bbox } from "../../utils/geometry.js";
-import { colorFor } from "../../utils/prediction.js";
+import { pointsOf, bbox, boundaryAreas } from "../../utils/geometry.js";
+import { buildWalls } from "../../utils/wallGraph.js";
+import { materialColors } from "../../config/materialColors.js";
+import { Heatmap3D } from "./SmoothHeatmap.jsx";
 import {
   getFloorLogs,
   getLogGridCells,
@@ -11,81 +13,63 @@ import {
   getMetricRanges,
 } from "../../utils/logOverlay.js";
 
-const materialColors = {
-  drywall: "#cbd5d1",
-  wood: "#ba9678",
-  glass: "#8ac8dc",
-  brick: "#b88778",
-  concrete: "#8b9ba5",
-  metal: "#8b9ca6",
-};
-function RoomWall({ a, b, side, room, doors, windows, wallTypes }) {
-  const len = Math.hypot(b.x - a.x, b.z - a.z),
-    angle = -Math.atan2(b.z - a.z, b.x - a.x),
-    height = Number(room.height) || 3,
-    material = wallTypes[`${room.id}:${side}`] || room.material || "drywall";
-  const openings = side
-    ? [
-        ...doors.map((o) => ({ ...o, kind: "door" })),
-        ...windows.map((o) => ({ ...o, kind: "window" })),
-      ]
-        .filter((o) => o.roomId === room.id && o.wallSide === side)
-        .map((o) => {
-          let start = Number(o.offset || 0),
-            width = Number(o.width || 1);
-          if (side === "south" || side === "west") start = len - start - width;
-          return {
-            ...o,
-            start: Math.max(0, start),
-            end: Math.min(len, start + width),
-          };
-        })
-        .filter((o) => o.end > o.start)
-        .sort((a, b) => a.start - b.start)
-    : [];
-  const pieces = [];
-  let cursor = 0;
-  const push = (from, to, bottom, top, key) => {
-    if (to - from > 0.015 && top - bottom > 0.015)
-      pieces.push({ from, to, bottom, top, key });
-  };
-  for (const o of openings) {
-    if (o.start < cursor) continue;
-    push(cursor, o.start, 0, height, `before-${o.id}`);
-    const bottom =
-        o.kind === "window" ? Math.max(0, Number(o.sillHeight || 1)) : 0,
-      top = Math.min(height, bottom + Number(o.height || 2));
-    push(o.start, o.end, 0, bottom, `below-${o.id}`);
-    push(o.start, o.end, top, height, `above-${o.id}`);
-    cursor = o.end;
-  }
-  push(cursor, len, 0, height, "after");
+// All walls of a floor from the shared wall model: a wall between two rooms (or
+// a room and the building shell) is drawn once, with its openings cut out.
+function Walls3D({ plan, floorId, tool, onSelect }) {
+  const walls = useMemo(
+    () => buildWalls(plan, floorId),
+    [
+      plan.rooms,
+      plan.boundaries,
+      plan.doors,
+      plan.windows,
+      plan.wallTypes,
+      floorId,
+    ],
+  );
+  const thickness = Math.max(0.01, Number(plan.wallThickness) || 0.2);
   return (
     <group>
-      {pieces.map((piece) => {
-        const mid = (piece.from + piece.to) / 2,
-          ratio = mid / len;
-        return (
-          <mesh
-            key={piece.key}
-            position={[
-              a.x + (b.x - a.x) * ratio,
-              (piece.top + piece.bottom) / 2,
-              a.z + (b.z - a.z) * ratio,
-            ]}
-            rotation={[0, angle, 0]}
-          >
-            <boxGeometry
-              args={[piece.to - piece.from, piece.top - piece.bottom, 0.08]}
-            />
-            <meshStandardMaterial
-              color={materialColors[material] || materialColors.drywall}
-              transparent
-              opacity={material === "glass" ? 0.35 : 0.72}
-            />
-          </mesh>
-        );
-      })}
+      {walls.flatMap((wall, wi) =>
+        wall.pieces.map((piece) => {
+          const mid = (piece.from + piece.to) / 2,
+            ratio = mid / wall.length;
+          const owner = wall.owners[0];
+          return (
+            <mesh
+              key={`${wi}-${piece.key}`}
+              position={[
+                wall.a.x + (wall.b.x - wall.a.x) * ratio,
+                (piece.top + piece.bottom) / 2,
+                wall.a.z + (wall.b.z - wall.a.z) * ratio,
+              ]}
+              rotation={[
+                0,
+                -Math.atan2(wall.b.z - wall.a.z, wall.b.x - wall.a.x),
+                0,
+              ]}
+              onPointerDown={(e) => {
+                if (tool !== "select") return;
+                e.stopPropagation();
+                onSelect({ type: owner.type, id: owner.id });
+              }}
+            >
+              <boxGeometry
+                args={[
+                  piece.to - piece.from,
+                  piece.top - piece.bottom,
+                  thickness,
+                ]}
+              />
+              <meshStandardMaterial
+                color={materialColors[wall.material] || materialColors.drywall}
+                transparent
+                opacity={wall.material === "glass" ? 0.35 : 0.72}
+              />
+            </mesh>
+          );
+        }),
+      )}
     </group>
   );
 }
@@ -140,7 +124,7 @@ function ShapeRoom({
       onPointerDown={(e) => {
         e.stopPropagation();
         if (tool !== "select") {
-          if (!["wall", "polygon"].includes(tool))
+          if (!["wall", "polygon", "boundary"].includes(tool))
             onPlace(tool, { x: e.point.x, z: e.point.z });
           return;
         }
@@ -168,22 +152,6 @@ function ShapeRoom({
           side={THREE.DoubleSide}
         />
       </mesh>
-      {p.map((a, i) => (
-        <RoomWall
-          key={i}
-          a={a}
-          b={p[(i + 1) % p.length]}
-          side={
-            room.shape === "rectangle"
-              ? ["north", "east", "south", "west"][i]
-              : ""
-          }
-          room={room}
-          doors={doors}
-          windows={windows}
-          wallTypes={wallTypes}
-        />
-      ))}
       {showRoomNames && (
         <Html
           position={[
@@ -222,7 +190,7 @@ function Draggable({
       onPointerDown={(e) => {
         e.stopPropagation();
         if (tool !== "select") {
-          if (!["wall", "polygon"].includes(tool))
+          if (!["wall", "polygon", "boundary"].includes(tool))
             onPlace(tool, { x: e.point.x, z: e.point.z });
           return;
         }
@@ -315,7 +283,9 @@ function Scene({
   tool,
   snap,
   predictions,
+  overlay,
   heatmap,
+  heatmapOpacity = 0.8,
   logsVisible,
   logGrid,
   metric,
@@ -325,7 +295,9 @@ function Scene({
   showFurnitureNames = true,
   showWifiNames = true,
   isStatic = true,
+  hiddenLayers = [],
 }) {
+  const shown = (id) => !hiddenLayers.includes(id);
   const rooms = plan.rooms.filter((r) => r.floorId === floorId),
     sources = plan.sources.filter((s) => s.floorId === floorId),
     walls = plan.interiorWalls.filter((w) => w.floorId === floorId),
@@ -340,6 +312,7 @@ function Scene({
     <>
       <ambientLight intensity={1.5} />
       <directionalLight position={[10, 20, 10]} intensity={2} />
+      {shown("grid") && (
       <Grid
         args={[200, 200]}
         cellSize={1}
@@ -349,13 +322,14 @@ function Scene({
         position={[0, -0.06, 0]}
         infiniteGrid
       />
+      )}
       <mesh
         position={[0, -0.04, 0]}
         rotation={[-Math.PI / 2, 0, 0]}
         onPointerDown={(e) => {
           e.stopPropagation();
           if (tool === "select") onSelect(null);
-          else if (!["wall", "polygon"].includes(tool))
+          else if (!["wall", "polygon", "boundary"].includes(tool))
             onPlace(tool, {
               x: snap ? Math.round(e.point.x * 2) / 2 : e.point.x,
               z: snap ? Math.round(e.point.z * 2) / 2 : e.point.z,
@@ -365,22 +339,14 @@ function Scene({
         <planeGeometry args={[1000, 1000]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
-      {heatmap &&
-        predictions.map((p, i) => (
-          <mesh
-            key={i}
-            position={[p.x, 0.015, p.z]}
-            rotation={[-Math.PI / 2, 0, 0]}
-          >
-            <planeGeometry args={[p.step, p.step]} />
-            <meshBasicMaterial
-              color={colorFor(p.dbm, plan.rf.thresholdDbm)}
-              transparent
-              opacity={0.64}
-              depthWrite={false}
-            />
-          </mesh>
-        ))}
+      {heatmap && (
+        <Heatmap3D
+          cells={predictions}
+          rooms={[...rooms, ...boundaryAreas(plan, floorId)]}
+          opacity={heatmapOpacity}
+          ranges={predictions[0]?.ranges}
+        />
+      )}
       {logsVisible &&
         (logGrid
           ? cells.map((c) => (
@@ -404,7 +370,7 @@ function Scene({
                 <meshBasicMaterial color={metricColor(l[metric])} />
               </mesh>
             )))}
-      {rooms.map((r) => (
+      {(shown("rooms") ? rooms : []).map((r) => (
         <ShapeRoom
           key={r.id}
           room={r}
@@ -460,7 +426,26 @@ function Scene({
           </mesh>
         );
       })}
-      {furniture.map((f) => (
+      {shown("walls") && (
+        <Walls3D plan={plan} floorId={floorId} tool={tool} onSelect={onSelect} />
+      )}
+      {overlay?.recommended?.map((r) => (
+        <mesh key={r.candidateId} position={[r.planX, r.heightM, r.planZ]}>
+          <sphereGeometry args={[0.3, 16, 16]} />
+          <meshStandardMaterial
+            color="#e8790a"
+            emissive="#e8790a"
+            emissiveIntensity={0.6}
+          />
+        </mesh>
+      ))}
+      {overlay?.candidates?.valid.map((c) => (
+        <mesh key={c.id} position={[c.x, c.heightM, c.z]}>
+          <sphereGeometry args={[0.08, 8, 8]} />
+          <meshBasicMaterial color="#16a34a" />
+        </mesh>
+      ))}
+      {(shown("furniture") ? furniture : []).map((f) => (
         <Draggable
           key={f.id}
           type="furniture"
@@ -501,7 +486,7 @@ function Scene({
           )}
         </Draggable>
       ))}
-      {sources.map((s) => (
+      {(shown("sources") ? sources : []).map((s) => (
         <Draggable
           key={s.id}
           type="source"
@@ -549,7 +534,10 @@ function Scene({
 export default function Plan3D(props) {
   return (
     <div className="plan3d">
-      <Canvas camera={{ position: [17, 23, 28], fov: 45 }}>
+      <Canvas
+        camera={{ position: [17, 23, 28], fov: 45 }}
+        gl={{ preserveDrawingBuffer: true }}
+      >
         <Scene {...props} />
       </Canvas>
     </div>

@@ -1,5 +1,6 @@
-// Local plan X points east and local Z points north at zero rotation.
-// rotationDeg turns local +X counterclockwise toward geographic north.
+// At zero rotation the plan is drawn the way the map looks: local +X points east
+// and the TOP of the plan (local -Z, since Z grows downwards on screen) points
+// north. rotationDeg turns local +X counterclockwise (on screen) toward north.
 const EARTH_RADIUS_M = 6371008.8;
 const RAD = Math.PI / 180;
 
@@ -35,10 +36,10 @@ export const localToGeographic = ({ x, z }, alignment) => {
   if (!isValidAlignment(alignment)) return null;
   const angle = Number(alignment.rotationDeg) * RAD;
   const dx = Number(x) - Number(alignment.x);
-  const dz = Number(z) - Number(alignment.z);
-  if (!Number.isFinite(dx) || !Number.isFinite(dz)) return null;
-  const east = dx * Math.cos(angle) - dz * Math.sin(angle);
-  const north = dx * Math.sin(angle) + dz * Math.cos(angle);
+  const up = -(Number(z) - Number(alignment.z)); // metres towards the top of the plan
+  if (!Number.isFinite(dx) || !Number.isFinite(up)) return null;
+  const east = dx * Math.cos(angle) - up * Math.sin(angle);
+  const north = dx * Math.sin(angle) + up * Math.cos(angle);
   const lat = Number(alignment.lat) + north / EARTH_RADIUS_M / RAD;
   const lng =
     Number(alignment.lng) +
@@ -57,7 +58,7 @@ export const geographicToLocal = ({ lat, lng }, alignment) => {
   const angle = Number(alignment.rotationDeg) * RAD;
   return {
     x: Number(alignment.x) + east * Math.cos(angle) + north * Math.sin(angle),
-    z: Number(alignment.z) - east * Math.sin(angle) + north * Math.cos(angle),
+    z: Number(alignment.z) + east * Math.sin(angle) - north * Math.cos(angle),
   };
 };
 
@@ -68,7 +69,7 @@ export const rotationFromTwoPoints = (planStart, planEnd, mapStart, mapEnd) => {
   )
     return null;
   const dx = Number(planEnd?.x) - Number(planStart?.x);
-  const dz = Number(planEnd?.z) - Number(planStart?.z);
+  const up = -(Number(planEnd?.z) - Number(planStart?.z));
   const east =
     (Number(mapEnd.lng) - Number(mapStart.lng)) *
     RAD *
@@ -77,12 +78,12 @@ export const rotationFromTwoPoints = (planStart, planEnd, mapStart, mapEnd) => {
   const north =
     (Number(mapEnd.lat) - Number(mapStart.lat)) * RAD * EARTH_RADIUS_M;
   if (
-    ![dx, dz, east, north].every(Number.isFinite) ||
-    Math.hypot(dx, dz) < 0.5 ||
+    ![dx, up, east, north].every(Number.isFinite) ||
+    Math.hypot(dx, up) < 0.5 ||
     Math.hypot(east, north) < 0.5
   )
     return null;
-  const degrees = (Math.atan2(north, east) - Math.atan2(dz, dx)) / RAD;
+  const degrees = (Math.atan2(north, east) - Math.atan2(up, dx)) / RAD;
   return ((((degrees + 180) % 360) + 360) % 360) - 180;
 };
 

@@ -1,5 +1,10 @@
 import net from "node:net";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { loadEnvFile } from "node:process";
+import path from "node:path";
+
+if (existsSync(".env")) loadEnvFile(".env");
 
 function canListen(port) {
   return new Promise((resolve) => {
@@ -15,14 +20,12 @@ async function isPlannerApi(port) {
     const health = await fetch(`${base}/api/health`, {
       signal: AbortSignal.timeout(1500),
     });
-    const projects = await fetch(`${base}/api/projects`, {
-      signal: AbortSignal.timeout(1500),
-    });
+    const status = await health.json();
     return (
       health.ok &&
-      (await health.json()).ok === true &&
-      projects.ok &&
-      Array.isArray(await projects.json())
+      status.ok === true &&
+      status.service === "indoor-planner-api" &&
+      status.licenseRequired === true
     );
   } catch {
     return false;
@@ -41,13 +44,18 @@ if (!(await canListen(apiPort))) {
     console.error(`API port ${apiPort} is in use. Choose another PORT.`);
     process.exit(1);
   } else {
-    while (!(await canListen(apiPort))) apiPort++;
+    const simulationPort = Number(process.env.SIM_PORT) || 3002;
+    while (apiPort === simulationPort || !(await canListen(apiPort))) apiPort++;
     console.log(`API port 3001 is in use; using ${apiPort}.`);
   }
 }
 
 const env = {
   ...process.env,
+  INDOOR_LICENSE_MODE: "required",
+  LICENSE_PUBLIC_KEY_FILE:
+    process.env.LICENSE_PUBLIC_KEY_FILE ||
+    path.resolve("licensing-private/public.key"),
   PORT: String(apiPort),
   API_PORT: String(apiPort),
 };

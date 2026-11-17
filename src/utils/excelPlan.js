@@ -13,7 +13,7 @@ import {
 } from "./indoorLogKpis.js";
 
 const loadExcelJS = async () => {
-  const module = await import("exceljs/dist/exceljs.bare.min.js");
+  const module = await import("exceljs/dist/exceljs.min.js");
   return module.default || module;
 };
 
@@ -120,7 +120,7 @@ export const downloadWorkbook = async (workbook, fileName) => {
   anchor.href = url;
   anchor.download = fileName;
   anchor.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 };
 
 export const createReviewedDetectedWorkbook = async (
@@ -199,6 +199,28 @@ export const createReviewedDetectedWorkbook = async (
       })),
     );
   return wb;
+};
+
+// The picture size, ceiling height and wall thickness written in the FloorMeta sheet (first floor), without
+// reading the rest of the workbook. Used as the scale of an imported plan image when the drawing prints none.
+export const readFloorMeta = async (buffer) => {
+  const ExcelJS = await loadExcelJS();
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  const row = worksheetToRows(workbook.getWorksheet("FloorMeta"))[0];
+  if (!row) return null;
+  const unit = String(getFirst(row, ["unit"]) || "m").trim().toLowerCase();
+  const perUnit = { m: 1, ft: 0.3048, feet: 0.3048, cm: 0.01, mm: 0.001 }[unit] || 1;
+  const metres = (keys) => {
+    const v = toNumber(getFirst(row, keys), null);
+    return v ? v * perUnit : null;
+  };
+  return {
+    imageWidthM: metres(["image_width_m", "image_width"]),
+    imageHeightM: metres(["image_height_m", "image_height"]),
+    ceilingHeightM: metres(["ceiling_height", "height"]),
+    wallThicknessM: metres(["wall_thickness", "wall"]),
+  };
 };
 
 export const parseBuildingWorkbook = async (buffer) => {

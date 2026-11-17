@@ -7,6 +7,8 @@ export const initialPlan = () => ({
   windows: [],
   interiorWalls: [],
   furniture: [],
+  boundaries: [],
+  savedResults: {}, // latest prediction / optimisation run (job references)
   sources: [],
   wallTypes: {},
   wallThickness: 0.2,

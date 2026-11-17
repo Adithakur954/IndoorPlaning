@@ -1,3 +1,7 @@
+import LogManager from "../planner/LogManager.jsx";
+import ReviewPanel from "../planner/ReviewPanel.jsx";
+import CollisionsPanel from "../planner/CollisionsPanel.jsx";
+import RotateControls from "../planner/RotateControls.jsx";
 import React, { useEffect, useState } from "react";
 import Plan2D from "../planner/Plan2D.jsx";
 import Plan3D from "../planner/Plan3D.jsx";
@@ -5,15 +9,24 @@ import RoomMaterials from "../planner/RoomMaterials.jsx";
 import { EditorToolOptions } from "../planner/EditorMenu.jsx";
 import { PropertyOptions } from "../planner/PropertyMenu.jsx";
 import Field from "../ui/Field.jsx";
+
+const DEFAULT_PANEL_WIDTH = 340;
+const MIN_PANEL_WIDTH = 260;
+const MAX_PANEL_WIDTH = 760;
+import MapLegend from "../planner/MapLegend.jsx";
+import PredictionPanel from "../planner/PredictionPanel.jsx";
+import OptimizationPanel from "../planner/OptimizationPanel.jsx";
+import MaterialsEditor from "../planner/MaterialsEditor.jsx";
 import { uid } from "../../models/plan.js";
 import { areaOf, pointsOf, resizePolygonPoints } from "../../utils/geometry.js";
 import { num } from "../../utils/number.js";
 
 export default function DesignPanel({
+  zoom,
+  setZoom,
   tool,
   setTool,
   view,
-  setView,
   plan,
   floorId,
   snap,
@@ -28,7 +41,27 @@ export default function DesignPanel({
   move,
   movePolygonPart,
   predictions,
+  predictionMetric,
+  predictionRanges,
+  weakBelowDbm,
+  rt,
+  setRt,
+  prediction,
+  optimization,
+  heatRanges,
+  legendSections,
+  setMetric,
+  kpiOptions,
+  metricRanges,
+  overlay,
+  setSelectedFloor,
+  setTab,
+  nestedNotes = [],
+  convertRoomToBoundary,
+  convertBoundaryToRoom,
+  moveBoundaryTo,
   heatmap,
+  heatmapOpacity,
   logsVisible,
   logGrid,
   metric,
@@ -41,6 +74,7 @@ export default function DesignPanel({
   deleteObj,
   floor,
   deleteFloor,
+  clearFloor,
   warnings,
   panelMode,
   setPanelMode,
@@ -48,7 +82,23 @@ export default function DesignPanel({
   isCustomCarpetArea,
   onCarpetAreaChange,
   onCarpetAreaReset,
+  carpetFit,
+  boundaryAreaM2,
+  carpetLengthM,
+  carpetWidthM,
+  onCarpetSize,
+  onCarpetFitBoundary,
   onStaticChange,
+  moveWithContents,
+  mapMode,
+  hiddenLayers,
+  mergeWall,
+  snapWalls,
+  setCollisionFocus,
+  setMoveWithContents,
+  setMapMode,
+  rotateSelected,
+  rotateWholeBuilding,
   onShowRoomNamesChange,
   onShowFurnitureNamesChange,
   onShowWifiNamesChange,
@@ -60,6 +110,42 @@ export default function DesignPanel({
   applyDraft,
   discardDraft,
 }) {
+  const [panelWidth, setPanelWidthState] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem("planner.panelWidth"));
+      return saved >= MIN_PANEL_WIDTH ? saved : DEFAULT_PANEL_WIDTH;
+    } catch {
+      return DEFAULT_PANEL_WIDTH;
+    }
+  });
+  const setPanelWidth = (width) => {
+    const next = Math.round(
+      Math.min(
+        Math.max(width, MIN_PANEL_WIDTH),
+        Math.min(MAX_PANEL_WIDTH, window.innerWidth * 0.7),
+      ),
+    );
+    setPanelWidthState(next);
+    try {
+      localStorage.setItem("planner.panelWidth", String(next));
+    } catch {
+      /* storage unavailable: the width just is not remembered */
+    }
+  };
+  const drag = React.useRef(null);
+  const startResize = (e) => {
+    drag.current = { x: e.clientX, width: panelWidth };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    document.body.classList.add("resizing-panel");
+  };
+  const moveResize = (e) => {
+    if (drag.current)
+      setPanelWidth(drag.current.width + (drag.current.x - e.clientX));
+  };
+  const endResize = () => {
+    drag.current = null;
+    document.body.classList.remove("resizing-panel");
+  };
   const [sizeDirections, setSizeDirections] = useState({ width: 1, depth: 1 });
   useEffect(() => {
     setSizeDirections({ width: 1, depth: 1 });
@@ -72,10 +158,10 @@ export default function DesignPanel({
     selected?.type === "room" && obj?.shape === "polygon" ? pointsOf(obj) : [];
   const roomFieldKeys =
     obj?.shape === "circle"
-      ? ["name", "shape", "x", "z", "radius", "height", "material"]
+      ? ["name", "shape", "x", "z", "radius", "height", "material", "apMounting", "receiverGrid"]
       : obj?.shape === "polygon"
-        ? ["name", "shape", "x", "z", "height", "material"]
-        : ["name", "shape", "x", "z", "width", "depth", "height", "material"];
+        ? ["name", "shape", "x", "z", "height", "material", "apMounting", "receiverGrid"]
+        : ["name", "shape", "x", "z", "width", "depth", "height", "material", "apMounting", "receiverGrid"];
   return (
     <>
       {draft && (
@@ -90,11 +176,47 @@ export default function DesignPanel({
           <button onClick={discardDraft}>Discard</button>
         </div>
       )}
-      <div className={`editor-grid ${panelMode ? "" : "panel-closed"}`}>
+      <div
+        className={`editor-grid ${panelMode ? "" : "panel-closed"}`}
+        style={{ "--panel-width": `${panelWidth}px` }}
+      >
         <div className="view-stack">
+          <MapLegend
+            optimization={optimization}
+            sections={legendSections}
+            metric={metric}
+            setMetric={setMetric}
+            kpiOptions={kpiOptions}
+            metricRanges={metricRanges}
+            heatmap={heatmap}
+            predictionMetric={predictionMetric}
+            predictionRanges={heatRanges}
+            overlay={overlay}
+            provenance={
+              optimization.opt && optimization.show !== "off" && mapMode === "optimise"
+                ? "opt"
+                : rt.active
+                  ? "rt"
+                  : "none"
+            }
+            hasLogs={logsVisible && plan.logs.some((l) => l.floorId === floorId)}
+            hasBoundary={(plan.boundaries || []).some((b) => b.floorId === floorId)}
+          />
+          {mapMode === "prediction" && (prediction.busy || prediction.run?.error) && (
+            <div
+              className={`map-status ${prediction.run?.error ? "error" : ""}`}
+              role="status"
+            >
+              {prediction.run?.error
+                ? prediction.run.error
+                : `${prediction.run.phase}… updating the ray-traced prediction`}
+            </div>
+          )}
           {(view === "2d" || view === "split") && (
             <Plan2D
               {...{
+                zoom,
+                onZoom: setZoom,
                 plan,
                 floorId,
                 tool,
@@ -109,13 +231,16 @@ export default function DesignPanel({
                 onMove: move,
                 onMovePolygonPart: movePolygonPart,
                 predictions,
+                overlay,
                 heatmap,
+                heatmapOpacity,
                 logsVisible,
                 logGrid,
                 metric,
                 gridSize,
                 aggregation,
                 draft,
+                hiddenLayers,
               }}
             />
           )}
@@ -135,22 +260,44 @@ export default function DesignPanel({
                 onPlace: place,
                 onMove: move,
                 predictions,
+                overlay,
                 heatmap,
+                heatmapOpacity,
                 logsVisible,
                 logGrid,
                 metric,
                 gridSize,
                 aggregation,
+                hiddenLayers,
               }}
             />
           )}
         </div>
+        {panelMode && (
+          <div
+            className="panel-resizer"
+            style={{ right: panelWidth }}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize the right panel (double-click to reset)"
+            title="Drag to resize · double-click to reset"
+            onPointerDown={startResize}
+            onPointerMove={moveResize}
+            onPointerUp={endResize}
+            onPointerCancel={endResize}
+            onDoubleClick={() => setPanelWidth(DEFAULT_PANEL_WIDTH)}
+          />
+        )}
         {panelMode && (
           <aside className="inspector">
             <div className="inspector-heading">
               <h3>
                 {panelMode === "tools"
                   ? "Tools"
+                  : panelMode === "prediction"
+                    ? "Prediction"
+                  : panelMode === "optimize"
+                    ? "Optimise AP placement"
                   : panelMode === "property"
                     ? "Project properties"
                     : obj
@@ -166,16 +313,56 @@ export default function DesignPanel({
                 &#x2715;
               </button>
             </div>
+            {(panelMode === "prediction" || panelMode === "optimize") && (
+              <div className="segmented mode-switch" role="group" aria-label="Mode">
+                <button
+                  type="button"
+                  className={panelMode === "prediction" ? "active" : ""}
+                  onClick={() => {
+                    setMapMode("prediction");
+                    setPanelMode("prediction");
+                  }}
+                >
+                  A · Existing APs
+                </button>
+                <button
+                  type="button"
+                  className={panelMode === "optimize" ? "active" : ""}
+                  onClick={() => {
+                    setMapMode("optimise");
+                    setPanelMode("optimize");
+                  }}
+                >
+                  B · Optimised
+                </button>
+              </div>
+            )}
             {panelMode === "tools" ? (
               <EditorToolOptions
                 tool={tool}
                 setTool={setTool}
-                view={view}
-                setView={setView}
                 snap={snap}
                 setSnap={setSnap}
               />
+            ) : panelMode === "optimize" ? (
+              <OptimizationPanel
+                plan={plan}
+                optimization={optimization}
+                setSelectedFloor={setSelectedFloor}
+                setTab={setTab}
+              />
+            ) : panelMode === "prediction" ? (
+              <PredictionPanel
+                plan={plan}
+                rt={rt}
+                setRt={setRt}
+                prediction={prediction}
+                predictionMetric={predictionMetric}
+                predictionRanges={predictionRanges}
+                weakBelowDbm={weakBelowDbm}
+              />
             ) : panelMode === "property" ? (
+              <>
               <PropertyOptions
                 carpetArea={carpetArea}
                 isCustom={isCustomCarpetArea}
@@ -189,7 +376,16 @@ export default function DesignPanel({
                 onShowWifiNamesChange={onShowWifiNamesChange}
                 onChange={onCarpetAreaChange}
                 onReset={onCarpetAreaReset}
+                fit={carpetFit}
+                boundaryAreaM2={boundaryAreaM2}
+                lengthM={carpetLengthM}
+                widthM={carpetWidthM}
+                onSize={onCarpetSize}
+                onFitBoundary={onCarpetFitBoundary}
+                onRotateBuilding={rotateWholeBuilding}
               />
+              <MaterialsEditor plan={plan} mutate={mutate} />
+              </>
             ) : obj ? (
               <>
                 <div className="inspector-fields">
@@ -210,6 +406,8 @@ export default function DesignPanel({
                           "azimuthDeg",
                           "beamwidthDeg",
                         ]
+                      : selected.type === "boundary"
+                        ? ["name", "height", "material"]
                       : selected.type === "wall"
                         ? ["name", "x1", "z1", "x2", "z2", "material"]
                         : selected.type === "furniture"
@@ -270,6 +468,10 @@ export default function DesignPanel({
                         options={
                           key === "shape"
                             ? ["rectangle", "circle", "polygon"]
+                            : key === "apMounting" || key === "receiverGrid"
+                              ? key === "receiverGrid"
+                                ? ["included", "excluded"]
+                                : ["allowed", "excluded"]
                             : key === "material"
                               ? [
                                   "drywall",
@@ -322,6 +524,66 @@ export default function DesignPanel({
                     );
                   })}
                 </div>
+                {selected.type === "boundary" && (
+                  <div className="inspector-fields">
+                    <Field
+                      label="X (left edge)"
+                      type="number"
+                      value={Math.min(...obj.points.map((q) => q.x))}
+                      onChange={(v) => moveBoundaryTo(obj.id, "x", v)}
+                    />
+                    <Field
+                      label="Z (top edge)"
+                      type="number"
+                      value={Math.min(...obj.points.map((q) => q.z))}
+                      onChange={(v) => moveBoundaryTo(obj.id, "z", v)}
+                    />
+                  </div>
+                )}
+                {(selected.type === "room" || selected.type === "boundary") && (
+                  <>
+                    <label className="property-hide-rooms move-contents">
+                      <input
+                        type="checkbox"
+                        checked={moveWithContents}
+                        onChange={(e) => setMoveWithContents(e.target.checked)}
+                      />
+                      <span>Move and rotate contents with the {selected.type}</span>
+                    </label>
+                    <div className="property-static-note">
+                      On: furniture, Wi-Fi/cellular sources, inner walls and
+                      rooms inside move and rotate together with it (doors and
+                      windows always follow). Off: only the {selected.type}{" "}
+                      moves.
+                    </div>
+                  </>
+                )}
+                {obj?.needsReview && (
+                  <div className="review-note">
+                    <small>
+                      Read from the drawing with {Math.round((obj.confidence ?? 0) * 100)}%
+                      confidence. Check it against the picture.
+                    </small>
+                    <button type="button" onClick={() => patchObj("needsReview", false)}>
+                      Confirm
+                    </button>
+                  </div>
+                )}
+                {["room", "furniture", "wall", "boundary"].includes(selected.type) && (
+                  <RotateControls
+                    label={`Rotate ${selected.type === "wall" ? "wall" : selected.type}`}
+                    onRotate={rotateSelected}
+                    note={
+                      selected.type === "room"
+                        ? moveWithContents
+                          ? "Turns about the room's centre together with its contents. 90° steps keep doors, windows and wall materials."
+                          : "Turns only the room, about its centre. 90° steps keep doors, windows and wall materials."
+                        : selected.type === "furniture"
+                          ? "Turns about its own centre. Angles other than multiples of 90° use the box that encloses the turned desk."
+                          : undefined
+                    }
+                  />
+                )}
                 {selected.type === "room" && obj.shape === "polygon" && (
                   <section className="polygon-editor">
                     <div className="polygon-editor-heading">
@@ -466,6 +728,29 @@ export default function DesignPanel({
                     ))}
                   </div>
                 )}
+                {selected.type === "room" && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={[...plan.doors, ...plan.windows].some(
+                      (o) => o.roomId === obj.id,
+                    )}
+                    title="Turns this room into the building outline (exterior wall, one floor slab). Rooms inside it stay. Not available while it has doors or windows."
+                    onClick={() => convertRoomToBoundary(obj.id)}
+                  >
+                    Use as building boundary
+                  </button>
+                )}
+                {selected.type === "boundary" && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    title="Turns this outline back into an ordinary room. An upright four-corner outline becomes a rectangle room."
+                    onClick={() => convertBoundaryToRoom(obj.id)}
+                  >
+                    Convert to room
+                  </button>
+                )}
                 <button className="delete-button" onClick={deleteObj}>
                   Delete {selected.type}
                 </button>
@@ -503,6 +788,33 @@ export default function DesignPanel({
                   value={plan.wallThickness}
                   onChange={(v) => mutate((p) => ({ ...p, wallThickness: v }))}
                 />
+                {plan.logs?.length > 0 && (
+                  <LogManager
+                    plan={plan}
+                    mutate={mutate}
+                    floorId={floorId}
+                    metric={metric}
+                  />
+                )}
+                {plan.images?.[floorId] && (
+                  <Field
+                    label="Floor image rotation (°)"
+                    type="number"
+                    value={plan.images[floorId].rotationDeg || 0}
+                    onChange={(v) =>
+                      mutate((p) => ({
+                        ...p,
+                        images: {
+                          ...p.images,
+                          [floorId]: { ...p.images[floorId], rotationDeg: v },
+                        },
+                      }))
+                    }
+                  />
+                )}
+                <button className="delete-button" onClick={clearFloor}>
+                  Clear this floor
+                </button>
                 {plan.floors.length > 1 && (
                   <button className="delete-button" onClick={deleteFloor}>
                     Delete floor
@@ -514,6 +826,46 @@ export default function DesignPanel({
                   reposition them.
                 </div>
               </>
+            )}
+            {panelMode === "selection" && (
+              <ReviewPanel
+                plan={plan}
+                floorId={floorId}
+                onSelect={setSelected}
+                onConfirm={(item) =>
+                  mutate((p) => {
+                    const list = { room: "rooms", door: "doors", window: "windows", wall: "interiorWalls" }[item.type];
+                    return {
+                      ...p,
+                      [list]: p[list].map((x) =>
+                        x.id === item.id ? { ...x, needsReview: false, confirmed: true } : x,
+                      ),
+                    };
+                  })
+                }
+              />
+            )}
+            {panelMode === "selection" && (
+              <CollisionsPanel
+                plan={plan}
+                floorId={floorId}
+                onMergeWall={mergeWall}
+                onSnapWalls={snapWalls}
+                onFocus={setCollisionFocus}
+              />
+            )}
+            {panelMode === "selection" && nestedNotes.length > 0 && (
+              <div className="note-box">
+                <strong>Rooms inside rooms</strong>
+                {nestedNotes.map((w, i) => (
+                  <p key={i}>{w}</p>
+                ))}
+                <small>
+                  Shared walls count once and the inner room gets no second
+                  floor. If the outer room is really the building outline, use
+                  "Use as building boundary" in its properties.
+                </small>
+              </div>
             )}
             {panelMode === "selection" && warnings.length > 0 && (
               <div className="warning">

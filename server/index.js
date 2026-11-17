@@ -1,9 +1,11 @@
-﻿import { app } from "./app.js";
-
 import { existsSync } from "node:fs";
 import { loadEnvFile } from "node:process";
 
 if (existsSync(".env")) loadEnvFile(".env");
+
+const { app } = await import("./app.js");
+const { projectStore } = await import("./repositories/projectRepository.js");
+projectStore(); // Migrate before accepting requests.
 
 const port = Number(process.env.PORT) || 3001;
 app.listen(port, "127.0.0.1", (error) => {

@@ -86,104 +86,159 @@ export function bbox(r) {
     maxZ: Math.max(...p.map((x) => x.z)),
   };
 }
+const TOUCH_TOLERANCE = 0.03; // metres: rooms closer than this share a wall
+
+const distanceToSegment = (p, a, b) => {
+  const dx = b.x - a.x,
+    dz = b.z - a.z,
+    len2 = dx * dx + dz * dz;
+  const t = len2
+    ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.z - a.z) * dz) / len2))
+    : 0;
+  return Math.hypot(p.x - (a.x + dx * t), p.z - (a.z + dz * t));
+};
+
+// Is every corner of `inner` inside `outer` or on its wall?
+export function isNestedIn(inner, outer) {
+  const o = pointsOf(outer);
+  return pointsOf(inner).every(
+    (p) =>
+      inside(p.x, p.z, outer) ||
+      o.some(
+        (a, i) =>
+          distanceToSegment(p, a, o[(i + 1) % o.length]) <= TOUCH_TOLERANCE,
+      ),
+  );
+}
+
+const areasOverlap = (ra, rb) => {
+  const a = bbox(ra),
+    b = bbox(rb);
+  const loX = Math.max(a.minX, b.minX),
+    hiX = Math.min(a.maxX, b.maxX),
+    loZ = Math.max(a.minZ, b.minZ),
+    hiZ = Math.min(a.maxZ, b.maxZ);
+  // touching or sharing a wall is not an overlap
+  if (hiX - loX <= TOUCH_TOLERANCE || hiZ - loZ <= TOUCH_TOLERANCE)
+    return false;
+  const n = 9;
+  for (let u = 0; u < n; u++)
+    for (let v = 0; v < n; v++) {
+      const x = loX + ((u + 0.5) * (hiX - loX)) / n,
+        z = loZ + ((v + 0.5) * (hiZ - loZ)) / n;
+      if (inside(x, z, ra) && inside(x, z, rb)) return true;
+    }
+  return false;
+};
+
+// Pairs [inner, outer] where one room lies completely inside another (for
+// example the building shell drawn as a room with the rooms in it).
+export function nestedRooms(rooms) {
+  const pairs = [];
+  for (let i = 0; i < rooms.length; i++)
+    for (let j = 0; j < rooms.length; j++) {
+      if (i === j || !areasOverlap(rooms[i], rooms[j])) continue;
+      if (!isNestedIn(rooms[i], rooms[j])) continue;
+      // identical rooms are a real overlap, not nesting
+      if (isNestedIn(rooms[j], rooms[i]) && j < i) continue;
+      if (isNestedIn(rooms[j], rooms[i])) continue;
+      pairs.push([rooms[i], rooms[j]]);
+    }
+  return pairs;
+}
+
+// Rooms that really overlap (partly, or identical). Rooms that only touch or
+// share a wall, and rooms nested inside another, are not reported.
 export function overlapWarnings(rooms) {
   const out = [];
+  const nested = nestedRooms(rooms);
+  const isPair = (a, b) =>
+    nested.some(([x, y]) => (x === a && y === b) || (x === b && y === a));
   for (let i = 0; i < rooms.length; i++)
     for (let j = i + 1; j < rooms.length; j++) {
-      const a = bbox(rooms[i]),
-        b = bbox(rooms[j]);
-      const loX = Math.max(a.minX, b.minX),
-        hiX = Math.min(a.maxX, b.maxX),
-        loZ = Math.max(a.minZ, b.minZ),
-        hiZ = Math.min(a.maxZ, b.maxZ);
-      if (hiX <= loX || hiZ <= loZ) continue;
-      let hit = false;
-      for (let u = 0; u < 7 && !hit; u++)
-        for (let v = 0; v < 7; v++) {
-          const x = loX + ((u + 0.5) * (hiX - loX)) / 7,
-            z = loZ + ((v + 0.5) * (hiZ - loZ)) / 7;
-          if (inside(x, z, rooms[i]) && inside(x, z, rooms[j])) {
-            hit = true;
-            break;
-          }
-        }
-      if (hit) out.push(`${rooms[i].name} overlaps ${rooms[j].name}`);
+      if (isPair(rooms[i], rooms[j])) continue;
+      if (areasOverlap(rooms[i], rooms[j]))
+        out.push(`${rooms[i].name} overlaps ${rooms[j].name}`);
     }
   return out;
 }
-export function roomWalls(r) {
-  const p = pointsOf(r);
-  return p.map((a, i) => ({
-    a,
-    b: p[(i + 1) % p.length],
-    roomId: r.id,
-    material: r.material || "drywall",
-    side: r.shape === "rectangle" ? ["north", "east", "south", "west"][i] : "",
-  }));
-}
-const cross = (a, b, c) =>
-  (b.x - a.x) * (c.z - a.z) - (b.z - a.z) * (c.x - a.x);
-export function intersection(a, b, c, d) {
-  return (
-    cross(a, b, c) * cross(a, b, d) < -1e-7 &&
-    cross(c, d, a) * cross(c, d, b) < -1e-7
+
+export const nestedRoomNotes = (rooms) =>
+  nestedRooms(rooms).map(
+    ([inner, outer]) => `${inner.name} is inside ${outer.name}`,
   );
+// Building outlines of a floor as room-like areas (polygons), so room helpers
+// such as inside() and pointsOf() work on them.
+export const boundaryAreas = (plan, floorId) =>
+  (plan.boundaries || [])
+    .filter((b) => b.floorId === floorId)
+    .map((b) => ({
+      id: b.id,
+      floorId: b.floorId,
+      name: b.name,
+      shape: "polygon",
+      polygonPoints: b.points,
+      height: b.height,
+      material: b.material,
+    }));
+
+// What sits inside a room on its floor: furniture and sources by their centre,
+// interior walls by their middle, and rooms nested inside it. Doors and windows
+// belong to a room by id, so they follow it without being listed here.
+export function roomContents(plan, room) {
+  const same = (x) => x.floorId === room.floorId;
+  return {
+    furniture: plan.furniture
+      .filter(
+        (f) =>
+          same(f) &&
+          inside(+f.x + (+f.width || 0) / 2, +f.z + (+f.depth || 0) / 2, room),
+      )
+      .map((f) => f.id),
+    sources: plan.sources
+      .filter((s) => same(s) && inside(+s.x, +s.z, room))
+      .map((s) => s.id),
+    walls: plan.interiorWalls
+      .filter((w) => same(w) && inside((+w.x1 + +w.x2) / 2, (+w.z1 + +w.z2) / 2, room))
+      .map((w) => w.id),
+    rooms: plan.rooms
+      .filter((r) => r.id !== room.id && same(r) && isNestedIn(r, room))
+      .map((r) => r.id),
+  };
 }
-export function wallsBetween(
-  a,
-  b,
-  rooms,
-  interiorWalls,
-  doors,
-  wallTypes = {},
-) {
-  const walls = rooms.flatMap(roomWalls).concat(
-    interiorWalls.map((w) => ({
-      a: { x: +w.x1, z: +w.z1 },
-      b: { x: +w.x2, z: +w.z2 },
-      material: w.material || "drywall",
-      roomId: w.roomId,
-      side: "",
-    })),
-  );
-  const unique = new Set();
-  return walls
-    .filter((w) => {
-      if (!intersection(a, b, w.a, w.b)) return false;
-      const key = [w.a, w.b]
-        .map((p) => `${p.x.toFixed(2)},${p.z.toFixed(2)}`)
-        .sort()
-        .join("|");
-      if (unique.has(key)) return false;
-      unique.add(key);
-      return true;
-    })
-    .map((w) => {
-      const material = wallTypes[`${w.roomId}:${w.side}`] || w.material;
-      const door = doors.some(
-        (d) =>
-          d.roomId === w.roomId &&
-          d.wallSide === w.side &&
-          segmentNear(a, b, w, d),
-      );
-      return { material, door };
-    });
+
+const movePolygon = (r, dx, dz) =>
+  r.shape === "polygon"
+    ? {
+        ...r,
+        x: +r.x + dx,
+        z: +r.z + dz,
+        polygonPoints: pointsOf(r).map((p) => ({ x: p.x + dx, z: p.z + dz })),
+      }
+    : { ...r, x: +r.x + dx, z: +r.z + dz };
+
+// The plan with everything inside `room` shifted by (dx, dz). The room itself
+// is not moved here.
+export function shiftRoomContents(plan, room, dx, dz) {
+  const c = roomContents(plan, room);
+  const ids = (list) => new Set(list);
+  const f = ids(c.furniture),
+    s = ids(c.sources),
+    w = ids(c.walls),
+    r = ids(c.rooms);
+  return {
+    ...plan,
+    furniture: plan.furniture.map((x) =>
+      f.has(x.id) ? { ...x, x: +x.x + dx, z: +x.z + dz } : x,
+    ),
+    sources: plan.sources.map((x) =>
+      s.has(x.id) ? { ...x, x: +x.x + dx, z: +x.z + dz } : x,
+    ),
+    interiorWalls: plan.interiorWalls.map((x) =>
+      w.has(x.id)
+        ? { ...x, x1: +x.x1 + dx, x2: +x.x2 + dx, z1: +x.z1 + dz, z2: +x.z2 + dz }
+        : x,
+    ),
+    rooms: plan.rooms.map((x) => (r.has(x.id) ? movePolygon(x, dx, dz) : x)),
+  };
 }
-function segmentNear(a, b, w, d) {
-  const length = Math.hypot(w.b.x - w.a.x, w.b.z - w.a.z),
-    t = Math.max(0, Math.min(1, Number(d.offset) / length)),
-    mid = { x: w.a.x + (w.b.x - w.a.x) * t, z: w.a.z + (w.b.z - w.a.z) * t };
-  const c1 = cross(a, b, w.a),
-    c2 = cross(a, b, w.b);
-  const f = c1 / (c1 - c2);
-  const at = { x: w.a.x + (w.b.x - w.a.x) * f, z: w.a.z + (w.b.z - w.a.z) * f };
-  return Math.hypot(mid.x - at.x, mid.z - at.z) < Number(d.width || 1) / 2;
-}
-export const materialLoss = {
-  drywall: 5,
-  wood: 4,
-  glass: 3,
-  brick: 10,
-  concrete: 16,
-  metal: 25,
-};

@@ -30,7 +30,7 @@ export default function AlignmentPanel({
         <h2>Place the building on Earth</h2>
         <p>
           Choose a local plan anchor and its latitude/longitude, then set the
-          rotation. Local +X points east and +Z points north at zero rotation.
+          rotation. At zero rotation the plan looks like the map: the right of the plan is east and the top of the plan is north.
           Use Google Maps to find coordinates.
         </p>
         <AlignmentEditor

@@ -4,6 +4,7 @@ export async function api(url, options = {}) {
     headers: { "Content-Type": "application/json", ...options.headers },
   });
   if (!response.ok) {
+    if (response.status === 402) window.dispatchEvent(new Event("license-required"));
     const body = await response.json().catch(() => ({}));
     throw new Error(body.error || `Request failed (${response.status})`);
   }

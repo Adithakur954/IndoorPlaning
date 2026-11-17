@@ -482,7 +482,7 @@ const getTemplateRooms = (floor) => {
 };
 
 export const createStoryBuildingTemplateWorkbook = async (floorCount = 34) => {
-  const module = await import("exceljs/dist/exceljs.bare.min.js");
+  const module = await import("exceljs/dist/exceljs.min.js");
   const ExcelJS = module.default || module;
   const wb = new ExcelJS.Workbook();
   addJsonWorksheet(wb, "BuildingMeta", [

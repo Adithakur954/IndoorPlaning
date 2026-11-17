@@ -2,6 +2,7 @@ const RED = "#dc2626";
 const ORANGE = "#f97316";
 const YELLOW = "#eab308";
 const LIME = "#84cc16";
+const BLUE = "#1d28d0";
 const GREEN = "#16a34a";
 
 const bands = (edges, colors, unit) =>
@@ -19,6 +20,9 @@ const bands = (edges, colors, unit) =>
   });
 
 const highIsGood = [RED, ORANGE, YELLOW, LIME, GREEN];
+// Default look for dBm signal maps (RSRP, RSSI): red below -70, then orange,
+// yellow, blue and green from -40 dBm up.
+const signalBands = [RED, ORANGE, YELLOW, BLUE, GREEN];
 const lowIsGood = [...highIsGood].reverse();
 
 export const INDOOR_LOG_KPIS = [
@@ -34,7 +38,7 @@ export const INDOOR_LOG_KPIS = [
       "Disp NR ssRSRP (dBm)",
       "csiRsrp",
     ],
-    thresholds: bands([-120, -110, -100, -90], highIsGood, "dBm"),
+    thresholds: bands([-70, -60, -50, -40], signalBands, "dBm"),
   },
   {
     key: "rsrq",
@@ -69,7 +73,15 @@ export const INDOOR_LOG_KPIS = [
     label: "RSSI",
     unit: "dBm",
     columns: ["RSSI  (2G-RxLEV)", "RSSI", "Disp RSSI (dBm)"],
-    thresholds: bands([-100, -90, -80, -70], highIsGood, "dBm"),
+    thresholds: bands([-70, -60, -50, -40], signalBands, "dBm"),
+  },
+  {
+    key: "snr",
+    label: "SNR",
+    unit: "dB",
+    columns: ["SNR", "SNR (dB)", "Wi-Fi SNR", "WiFi SNR", "Disp SNR (dB)"],
+    // Wi-Fi: below 10 dB is poor, 25 dB and above is good for high data rates
+    thresholds: bands([10, 15, 25, 40], highIsGood, "dB"),
   },
   {
     key: "dl_thpt",
@@ -135,6 +147,30 @@ export const INDOOR_LOG_KPIS = [
     thresholds: bands([1, 2, 5, 10], lowIsGood, "%"),
   },
 ];
+
+// Wi-Fi shows RSSI, SNR and throughput only; cellular shows the radio quality
+// KPIs (RSRP, RSRQ, SINR ...), not the Wi-Fi RSSI and SNR; mixed shows all.
+export const WIFI_KPI_KEYS = ["rssi", "snr", "dl_thpt", "ul_thpt"];
+export const kpisForKind = (kind) =>
+  kind === "wifi"
+    ? INDOOR_LOG_KPIS.filter((k) => WIFI_KPI_KEYS.includes(k.key))
+    : kind === "cellular"
+      ? INDOOR_LOG_KPIS.filter((k) => k.key !== "rssi" && k.key !== "snr")
+      : INDOOR_LOG_KPIS;
+export const defaultKpiFor = (kind) => (kind === "cellular" ? "rsrp" : "rssi");
+
+// The network type on a floor: the selected access point's kind, else the kind
+// of the floor's sources (wifi when there are none, "all" when mixed).
+export const networkKindOf = (sources, selectedSource) => {
+  if (selectedSource?.kind === "wifi" || selectedSource?.kind === "cellular")
+    return selectedSource.kind;
+  const kinds = new Set(
+    sources
+      .map((s) => s.kind)
+      .filter((k) => k === "wifi" || k === "cellular"),
+  );
+  return kinds.size === 1 ? [...kinds][0] : kinds.size ? "all" : "wifi";
+};
 
 export const normalizeLogColumn = (column) =>
   String(column)

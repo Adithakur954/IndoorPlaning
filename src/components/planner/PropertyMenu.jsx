@@ -1,4 +1,5 @@
 import React from "react";
+import RotateControls from "./RotateControls.jsx";
 
 export default function PropertyMenu({ active, onOpen }) {
   return (
@@ -26,6 +27,13 @@ export function PropertyOptions({
   onShowWifiNamesChange,
   onChange,
   onReset,
+  fit = false,
+  boundaryAreaM2 = 0,
+  lengthM = null,
+  widthM = null,
+  onSize,
+  onFitBoundary,
+  onRotateBuilding,
 }) {
   return (
     <>
@@ -48,13 +56,71 @@ export function PropertyOptions({
         </span>
       </label>
       <div className="property-area-note">
-        {isCustom ? "Custom project value" : "Calculated from room areas"}
-        {isCustom && (
+        Length runs east–west (left–right on the plan), width north–south
+        (top–bottom).
+      </div>
+      <div className="property-area-size">
+        <label>
+          <span>Length (m)</span>
+          <input
+            aria-label="Carpet length in metres"
+            type="number"
+            min="0"
+            step="0.1"
+            value={lengthM ?? ""}
+            onChange={(e) => onSize(e.target.value, widthM)}
+          />
+        </label>
+        <label>
+          <span>Width (m)</span>
+          <input
+            aria-label="Carpet width in metres"
+            type="number"
+            min="0"
+            step="0.1"
+            value={widthM ?? ""}
+            onChange={(e) => onSize(lengthM, e.target.value)}
+          />
+        </label>
+      </div>
+      <div className="button-row">
+        <button
+          type="button"
+          disabled={!boundaryAreaM2}
+          aria-pressed={fit}
+          title={
+            boundaryAreaM2
+              ? "Use the area inside the external boundary"
+              : "Draw the external boundary first (Boundary tool)"
+          }
+          onClick={onFitBoundary}
+        >
+          {fit
+            ? `Fitted to boundary (${boundaryAreaM2.toFixed(1)} m²)`
+            : "Fit to external boundary"}
+        </button>
+      </div>
+      <div className="property-area-note">
+        {fit
+          ? "Follows the external boundary"
+          : isCustom
+            ? lengthM && widthM
+              ? "Length × width"
+              : "Custom project value"
+            : "Calculated from room areas"}
+        {(isCustom || fit) && (
           <button type="button" className="property-reset" onClick={onReset}>
             Use room total
           </button>
         )}
       </div>
+      {onRotateBuilding && (
+        <RotateControls
+          label="Rotate whole building"
+          onRotate={onRotateBuilding}
+          note="All floors, rooms, objects and the boundary turn together about the building centre. The map alignment turns with them so logs stay on the same rooms. Floor-plan background images turn with them."
+        />
+      )}
       <label className="property-hide-rooms">
         <input
           type="checkbox"
