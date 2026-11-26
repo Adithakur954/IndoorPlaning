@@ -107,3 +107,24 @@ test("the combined report has the coverage-vs-APs-added chart with one line per 
     assert.ok(s.points[1].pct >= s.points[0].pct); // adding an AP never lowers coverage
   }
 });
+
+test("the optimiser's two designs (different APs per band) can be compared without changing the plan", async () => {
+  const emptyPlan = { ...plan, sources: [] };
+  const design24 = { ...plan, sources: [{ ...plan.sources[0], id: "o1", name: "AP-opt-1", origin: "optimized", band: "2.4" }] };
+  const design5 = { ...plan, sources: plan.sources.map((s, i) => ({ ...s, id: `o5${i}`, name: `AP-opt-${i + 1}`, origin: "optimized", band: "5" })) };
+  const blob = await buildBandComparisonReport({
+    plan: emptyPlan,
+    planByBand: { "2.4": design24, 5: design5 },
+    designLabel: "Optimised designs from the optimiser run (not applied to the plan)",
+    projectName: "Demo",
+    runs: { "2.4": run("j24", 2437), 5: run("j5", 5180) },
+    ranges: [{ min: -Infinity, max: -70, color: "#f00" }, { min: -70, max: Infinity, color: "#0f0" }],
+    designThr: -67,
+    getMap: async (jobId) => maps[jobId],
+  });
+  const xml = await (await JSZip.loadAsync(await blob.arrayBuffer())).file("word/document.xml").async("string");
+  assert.ok(xml.includes("not the same APs on two bands"), "says the designs differ");
+  assert.ok(xml.includes("1 (2.4 GHz design) / 2 (5 GHz design)"), "AP count of each design");
+  assert.ok(xml.includes("Optimised designs from the optimiser run (not applied to the plan)"), "design label");
+  assert.equal(emptyPlan.sources.length, 0, "the plan itself is not changed");
+});

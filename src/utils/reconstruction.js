@@ -10,6 +10,12 @@ const SIDES = ["north", "east", "south", "west"];
 const round = (v, digits = 3) => Math.round(v * 10 ** digits) / 10 ** digits;
 const DEFAULT_HEIGHT_M = 3;
 const REVIEW_BELOW = 0.7;
+// Typical wall thickness by material (m), used when the picture is too coarse to measure a wall's real width
+// (a drawn line on a small picture of a big building is far wider than the wall). Heavy concrete: 0.3 m.
+export const TYPICAL_THICKNESS_M = { concrete: 0.25, brick: 0.2, drywall: 0.12, wood: 0.05, glass: 0.012, metal: 0.005 };
+const HEAVY_CONCRETE_M = 0.3;
+// a picture whose pixel is at most this many metres shows a wall's real width
+const FINE_PIXEL_M = 0.03;
 
 const distanceToSegment = (p, a, b) => {
   const dx = b.x - a.x,
@@ -47,6 +53,56 @@ const rectCorners = (r) => [
   { x: r.x + r.width, z: r.z + r.depth },
   { x: r.x, z: r.z + r.depth },
 ];
+
+const segDistance = (w, v) =>
+  Math.min(
+    distanceToSegment(xz(w.aM), xz(v.aM), xz(v.bM)),
+    distanceToSegment(xz(w.bM), xz(v.aM), xz(v.bM)),
+    distanceToSegment(xz(v.aM), xz(w.aM), xz(w.bM)),
+    distanceToSegment(xz(v.bM), xz(w.aM), xz(w.bM)),
+  );
+
+// The box of the building's walls: the connected network of walls (ends within `tol` metres,
+// a door gap) with the most wall length, grown by every other network that overlaps it.
+// Exported for tests.
+export function buildingBox(wallsM, tol = 2.6) {
+  if (wallsM.length < 3) return null;
+  const parent = wallsM.map((_, i) => i);
+  const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  for (let i = 0; i < wallsM.length; i += 1)
+    for (let j = i + 1; j < wallsM.length; j += 1)
+      if (segDistance(wallsM[i], wallsM[j]) <= tol) parent[find(i)] = find(j);
+  const groups = new Map();
+  wallsM.forEach((w, i) => {
+    const g = find(i);
+    const len = Math.hypot(w.bM[0] - w.aM[0], w.bM[1] - w.aM[1]);
+    const cur = groups.get(g) || { len: 0, x0: Infinity, x1: -Infinity, z0: Infinity, z1: -Infinity };
+    cur.len += len;
+    cur.x0 = Math.min(cur.x0, w.aM[0], w.bM[0]);
+    cur.x1 = Math.max(cur.x1, w.aM[0], w.bM[0]);
+    cur.z0 = Math.min(cur.z0, w.aM[1], w.bM[1]);
+    cur.z1 = Math.max(cur.z1, w.aM[1], w.bM[1]);
+    groups.set(g, cur);
+  });
+  const list = [...groups.values()].sort((a, b) => b.len - a.len);
+  const box = { ...list[0] };
+  let grown = true;
+  while (grown) {
+    grown = false;
+    for (const g of list.slice(1)) {
+      if (g.used) continue;
+      if (g.x1 >= box.x0 && g.x0 <= box.x1 && g.z1 >= box.z0 && g.z0 <= box.z1) {
+        box.x0 = Math.min(box.x0, g.x0);
+        box.x1 = Math.max(box.x1, g.x1);
+        box.z0 = Math.min(box.z0, g.z0);
+        box.z1 = Math.max(box.z1, g.z1);
+        g.used = true;
+        grown = true;
+      }
+    }
+  }
+  return { x0: box.x0, x1: box.x1, z0: box.z0, z1: box.z1 };
+}
 
 export function reconstructionToPlan(result, floorId, options = {}) {
   const { height = DEFAULT_HEIGHT_M, material = "drywall" } = options;
@@ -96,15 +152,16 @@ export function reconstructionToPlan(result, floorId, options = {}) {
   // ---- the whole floor ------------------------------------------------------
   // An open-plan office has no closed room: only small enclosures are found. When the closed rooms cover
   // little of the area inside the outermost walls, that area itself is added as one room ("Floor"),
-  // so the open office exists in the editor and the enclosures sit inside it.
+  // so the open office exists in the editor and the enclosures sit inside it. Its outline is the
+  // building's own walls (the main connected wall network), never the whole sheet: title blocks,
+  // legends and the sheet frame are separate pieces and stay out.
   {
     const wallsM = (result.walls || []).filter(
       (w) => w.aM && w.bM && Math.hypot(w.bM[0] - w.aM[0], w.bM[1] - w.aM[1]) >= 3,
     );
-    if (wallsM.length >= 3) {
-      const xs = wallsM.flatMap((w) => [w.aM[0], w.bM[0]]);
-      const zs = wallsM.flatMap((w) => [w.aM[1], w.bM[1]]);
-      const x0 = Math.min(...xs), x1 = Math.max(...xs), z0 = Math.min(...zs), z1 = Math.max(...zs);
+    const box = buildingBox(wallsM);
+    if (box) {
+      const { x0, x1, z0, z1 } = box;
       const area = (x1 - x0) * (z1 - z0);
       const covered = rooms.reduce((sum, r) => sum + r.width * r.depth, 0);
       if (area > 4 && covered / area < 0.6)
@@ -140,6 +197,51 @@ export function reconstructionToPlan(result, floorId, options = {}) {
     return t.length ? t[Math.floor(t.length / 2)] : 0.2;
   })();
   const reach = Math.max(0.25, thickness);
+
+  // ---- wall materials read from the drawing's legend ------------------------
+  // The worker gives each wall the material whose legend colour it is drawn in ("Concrete [Heavy]" = cyan...).
+  // A room side takes the material of the legend walls running along it (when they cover at least half of it):
+  // per side for a rectangle room, the majority for a polygon room.
+  const legendWalls = (result.walls || []).filter((w) => w.material && w.aM && w.bM);
+  const sideTol = Math.max(0.3, 3 / result.scale.pxPerM);
+  const materialAlong = (a, b) => {
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    if (len < 1e-6 || !legendWalls.length) return null;
+    const ux = (b.x - a.x) / len,
+      uz = (b.z - a.z) / len;
+    const off = (q) => Math.abs(-uz * (q.x - a.x) + ux * (q.z - a.z));
+    const byMaterial = {};
+    for (const w of legendWalls) {
+      const p = xz(w.aM),
+        q = xz(w.bM);
+      if (off(p) > sideTol || off(q) > sideTol) continue;
+      const t1 = (p.x - a.x) * ux + (p.z - a.z) * uz,
+        t2 = (q.x - a.x) * ux + (q.z - a.z) * uz;
+      const overlap = Math.min(len, Math.max(t1, t2)) - Math.max(0, Math.min(t1, t2));
+      if (overlap > 0) byMaterial[w.material] = (byMaterial[w.material] || 0) + overlap;
+    }
+    const best = Object.entries(byMaterial).sort((x, y) => y[1] - x[1])[0];
+    return best && best[1] >= 0.5 * len ? best[0] : null;
+  };
+  const wallTypes = {};
+  for (const room of rooms) {
+    const pts = room.shape === "rectangle" ? rectCorners(room) : room.polygonPoints;
+    const sides = pts.map((a, i) => {
+      const b = pts[(i + 1) % pts.length];
+      return { m: materialAlong(a, b), len: Math.hypot(b.x - a.x, b.z - a.z) };
+    });
+    if (room.shape === "rectangle") {
+      sides.forEach(({ m }, i) => {
+        if (m && m !== room.material) wallTypes[`${room.id}:${SIDES[i]}`] = m;
+      });
+    } else {
+      const perimeter = sides.reduce((t, x) => t + x.len, 0);
+      const byMaterial = {};
+      for (const { m, len } of sides) if (m) byMaterial[m] = (byMaterial[m] || 0) + len;
+      const best = Object.entries(byMaterial).sort((x, y) => y[1] - x[1])[0];
+      if (best && best[1] >= 0.5 * perimeter) room.material = best[0];
+    }
+  }
 
   const doors = [];
   const windows = [];
@@ -200,25 +302,29 @@ export function reconstructionToPlan(result, floorId, options = {}) {
     );
 
   // ---- partitions that are not part of a room ------------------------------
-  // Loose wall pieces that were read with low confidence are usually furniture
-  // edges: they are not added (they would block the signal in the simulation).
-  // (Only pieces joined to the outer walls count: a loose piece in the middle of a
-  // floor is almost always a desk edge or a symbol.)
+  // Every wall the detection shows is added: a wall that does not close a room (a gap at a
+  // join, a partition that stops in the open) is still a wall. Uncertain ones, and pieces not
+  // joined to the rest of the building, are marked for review instead of being dropped. Only
+  // marks too small or too faint to be a wall are left out (a symbol, a desk edge, a stray line).
+  const MIN_WALL_M = 0.5;
+  const MIN_LOOSE_M = 1.5; // a piece joined to nothing must be at least this long
+  const MIN_CONFIDENCE = 0.3;
+  const lengthM = (w) => Math.hypot(w.bM[0] - w.aM[0], w.bM[1] - w.aM[1]);
   const looseWalls = (result.walls || []).filter((w) => w.role === "free" && w.aM && w.bM);
-  const freeWalls = looseWalls.filter((w) => w.anchored !== false);
-  const unanchored = looseWalls.length - freeWalls.length;
-  if (unanchored)
+  const kept = looseWalls.filter(
+    (w) =>
+      lengthM(w) >= MIN_WALL_M &&
+      w.confidence >= MIN_CONFIDENCE &&
+      (w.anchored !== false || lengthM(w) >= MIN_LOOSE_M),
+  );
+  const left = looseWalls.length - kept.length;
+  if (left)
     warnings.push(
-      `${unanchored} loose wall piece(s) not joined to any outer wall were not added (likely furniture).`,
+      `${left} tiny or very faint mark(s) were not added as walls (under ${MIN_LOOSE_M} m and joined to nothing, or under ${MIN_WALL_M} m); see the detection overlay.`,
     );
-  const skippedWalls = freeWalls.filter((w) => w.confidence < REVIEW_BELOW).length;
-  if (skippedWalls)
-    warnings.push(
-      `${skippedWalls} uncertain loose wall piece(s) were not added (likely furniture); see the detection overlay.`,
-    );
-  const interiorWalls = freeWalls
-    .filter((w) => w.confidence >= REVIEW_BELOW)
-    .map((w, i) => ({
+  const interiorWalls = kept.map((w, i) => {
+    const loose = w.anchored === false;
+    return {
       id: uid(),
       floorId,
       name: `Wall ${i + 1}`,
@@ -226,11 +332,17 @@ export function reconstructionToPlan(result, floorId, options = {}) {
       z1: round(w.aM[1]),
       x2: round(w.bM[0]),
       z2: round(w.bM[1]),
-      material,
+      material: w.material || material,
       height,
       confidence: w.confidence,
-      needsReview: w.confidence < REVIEW_BELOW,
-    }));
+      needsReview: w.confidence < REVIEW_BELOW || loose,
+      reviewNotes: [
+        ...(w.notes || []),
+        ...(w.materialLabel ? [`material from the drawing's legend: ${w.materialLabel}`] : []),
+        ...(loose ? ["not joined to the rest of the building: check it is a wall"] : []),
+      ],
+    };
+  });
 
   // ---- columns: obstructions, kept as named boxes --------------------------
   const furniture = (result.columns || [])
@@ -275,6 +387,45 @@ export function reconstructionToPlan(result, floorId, options = {}) {
     .filter((m) => m.xM != null && m.yM != null)
     .map((m) => ({ x: round(m.xM), z: round(m.yM) }));
 
+  // ---- wall thickness ---------------------------------------------------------
+  // A fine picture (a pixel of at most 3 cm, or walls drawn as two lines whose gap IS the wall) shows the real
+  // width: the measured one is used. A coarse picture only shows how thick the line was drawn, so the typical
+  // thickness of the material is used instead and you are told to check it. Materials read from the legend get
+  // their own thickness the same way.
+  const mPerPx = 1 / result.scale.pxPerM;
+  const fine = mPerPx <= FINE_PIXEL_M || /double/.test(result.wallThickness?.style || "");
+  const median = (list) => {
+    const t = list.filter((v) => v > 0).sort((a, b) => a - b);
+    return t.length ? t[Math.floor(t.length / 2)] : null;
+  };
+  const clampT = (v) => round(Math.min(0.6, Math.max(0.05, v)), 3);
+  const materialThickness = {};
+  const legendMaterials = [...new Set(legendWalls.map((w) => w.material))];
+  let wallThickness, thicknessNote;
+  if (fine) {
+    wallThickness = clampT(median((result.walls || []).map((w) => w.thicknessM)) ?? TYPICAL_THICKNESS_M[material]);
+    thicknessNote = `Wall thickness ${wallThickness} m, measured on the drawing (1 px = ${round(mPerPx * 100, 1)} cm).`;
+    for (const m of legendMaterials) {
+      const t = median(legendWalls.filter((w) => w.material === m).map((w) => w.thicknessM));
+      if (t) materialThickness[m] = clampT(t);
+    }
+  } else {
+    wallThickness = TYPICAL_THICKNESS_M[material] ?? 0.12;
+    thicknessNote =
+      `Wall thickness ${wallThickness} m is the typical value for ${material}: the picture is too coarse to measure it ` +
+      `(1 px = ${round(mPerPx * 100, 1)} cm, so a drawn line looks far thicker than the wall). Set the real thickness in the floor properties.`;
+    for (const m of legendMaterials) {
+      const heavy = legendWalls.some((w) => w.material === m && /heavy/i.test(w.materialLabel || ""));
+      materialThickness[m] = m === "concrete" && heavy ? HEAVY_CONCRETE_M : TYPICAL_THICKNESS_M[m];
+    }
+  }
+  warnings.push(thicknessNote);
+  if (legendMaterials.length)
+    warnings.push(
+      `Materials from the drawing's legend: ${legendMaterials.map((m) => `${m} ${materialThickness[m]} m`).join(", ")}. ` +
+        "Walls in colours the legend does not list keep the default; check them.",
+    );
+
   const review = {
     rooms: rooms.filter((r) => r.needsReview).length,
     openings: [...doors, ...windows].filter((o) => o.needsReview).length,
@@ -288,7 +439,10 @@ export function reconstructionToPlan(result, floorId, options = {}) {
     furniture,
     furnitureCounts: counts,
     apMarkers,
-    wallThickness: round(Math.min(0.5, Math.max(0.05, thickness)), 2),
+    wallThickness,
+    thicknessNote,
+    materialThickness,
+    wallTypes,
     image: {
       widthM: result.scale.widthM,
       heightM: result.scale.heightM,
@@ -311,6 +465,14 @@ export function applyReconstruction(plan, converted, floorId, { replace = true, 
     furniture: [...keep(plan.furniture), ...converted.furniture],
     wallThickness: converted.wallThickness,
   };
+  // the materials found in the legend get their thickness, unless you have already set one
+  const mt = converted.materialThickness || {};
+  if (Object.keys(mt).length) {
+    const overrides = { ...(plan.materialOverrides || {}) };
+    for (const [m, t] of Object.entries(mt))
+      if (overrides[m]?.thicknessM == null || overrides[m]?.thicknessM === "") overrides[m] = { ...(overrides[m] || {}), thicknessM: t };
+    next.materialOverrides = overrides;
+  }
   if (accessPoints.length || replace)
     next.sources = [
       // an earlier import's detected APs on this floor are replaced; the APs you placed stay
@@ -325,6 +487,8 @@ export function applyReconstruction(plan, converted, floorId, { replace = true, 
       Object.entries(plan.wallTypes || {}).filter(([k]) => !gone.has(k.split(":")[0])),
     );
   }
+  if (converted.wallTypes && Object.keys(converted.wallTypes).length)
+    next.wallTypes = { ...(next.wallTypes || plan.wallTypes || {}), ...converted.wallTypes };
   if (image) next.images = { ...plan.images, [floorId]: image };
   return next;
 }

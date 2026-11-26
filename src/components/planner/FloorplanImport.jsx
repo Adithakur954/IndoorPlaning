@@ -14,6 +14,7 @@ import {
 import { getProfiles, sourceFieldsFromProfile } from "../../config/apProfiles.js";
 import { readFloorMeta } from "../../utils/excelPlan.js";
 import { uid } from "../../models/plan.js";
+import { pointsFromPrinted, twoLengthScale } from "../../utils/scaleCalibration.js";
 
 const VIEWS = [
   ["overlay.png", "Detected structure"],
@@ -22,13 +23,22 @@ const VIEWS = [
   ["model_overlay.png", "What the model sees"],
 ];
 
+const POINT_KEYS = ["A", "B", "C", "D"];
+
 // Image or PDF -> walls, openings and rooms, locally and for free. The scale
-// must come from a length you know; nothing is guessed from the picture.
-export default function FloorplanImport({ plan, floorId, mutate, setMessage, setTab, hideImage }) {
+// must come from lengths you confirm; nothing is guessed from the picture. Two
+// lengths are asked for, A-B across and C-D up-down, because a picture can be
+// stretched (one scale across, another up-down) and one length cannot show it.
+// When the drawing prints its sizes ("190.00 m", "80.00 m"), A-B and C-D are
+// placed on those dimension lines for you to check.
+export default function FloorplanImport({ plan, floorId, mutate, setMessage, setTab, hideImage, showImage }) {
   const [upload, setUpload] = useState(null);
-  const [points, setPoints] = useState([]); // preview pixels
-  const [knownLength, setKnownLength] = useState("");
-  const [imageWidthM, setImageWidthM] = useState("");
+  const [pts, setPts] = useState({}); // { A, B, C, D }: preview pixels
+  const [knownLength, setKnownLength] = useState("");   // A-B (m)
+  const [knownHeight, setKnownHeight] = useState("");   // C-D (m)
+  const [notStretched, setNotStretched] = useState(false);
+  const [printedNote, setPrintedNote] = useState("");
+  const [dragging, setDragging] = useState(null);
   const [style, setStyle] = useState("auto");
   const [ocr, setOcr] = useState(true);
   const [busy, setBusy] = useState("");
@@ -47,7 +57,11 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
     if (!file) return;
     setError("");
     setResult(null);
-    setPoints([]);
+    setPts({});
+    setKnownLength("");
+    setKnownHeight("");
+    setNotStretched(false);
+    setPrintedNote("");
     setBusy("Reading the file…");
     try {
       if (upload) removeReconstruction(upload.id);
@@ -63,38 +77,51 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
     }
   };
 
-  const click = (event) => {
+  const toPreview = (event) => {
     const box = imageRef.current.getBoundingClientRect();
-    const scale = upload.width / box.width;
-    const p = [
-      Math.round((event.clientX - box.left) * scale),
-      Math.round((event.clientY - box.top) * scale),
+    const k = upload.width / box.width;
+    return [
+      Math.max(0, Math.min(upload.width, Math.round((event.clientX - box.left) * k))),
+      Math.max(0, Math.min(upload.height, Math.round((event.clientY - box.top) * k))),
     ];
-    setPoints((current) => (current.length >= 2 ? [p] : [...current, p]));
+  };
+  // a click places the next missing point (A, B, then C, D); placed points are moved by dragging them
+  const click = (event) => {
+    const p = toPreview(event);
+    const next = POINT_KEYS.slice(0, notStretched ? 2 : 4).find((key) => !pts[key]);
+    if (next) setPts((cur) => ({ ...cur, [next]: p }));
+  };
+  const drag = (event) => {
+    if (!dragging) return;
+    const p = toPreview(event);
+    setPts((cur) => ({ ...cur, [dragging]: p }));
   };
 
-  // pixels of the preview image between the two points
-  const pickedPx =
-    points.length === 2
-      ? Math.hypot(points[1][0] - points[0][0], points[1][1] - points[0][1])
-      : null;
+  const orig = (p) => p.map((v) => v / upload.previewScale);
+  const dist = (p, q) => (p && q ? Math.hypot(q[0] - p[0], q[1] - p[1]) / upload.previewScale : null);
+  const abPx = dist(pts.A, pts.B);
+  const cdPx = dist(pts.C, pts.D);
   const length = Number(knownLength);
-  const widthM = Number(imageWidthM);
+  const height = Number(knownHeight);
+  const abOk = abPx > 5 && length > 0;
+  const cdOk = !notStretched && cdPx > 5 && height > 0;
+  const two = abOk && cdOk ? twoLengthScale(orig(pts.A), orig(pts.B), length, orig(pts.C), orig(pts.D), height) : null;
   const scale =
-    pickedPx && length > 0
-      ? {
-          pointA: points[0].map((v) => v / upload.previewScale),
-          pointB: points[1].map((v) => v / upload.previewScale),
-          lengthM: length,
-        }
-      : widthM > 0
-        ? { imageWidthM: widthM }
+    abOk && two
+      ? { pointA: orig(pts.A), pointB: orig(pts.B), lengthM: length, pointC: orig(pts.C), pointD: orig(pts.D), heightM: height }
+      : abOk && notStretched
+        ? { pointA: orig(pts.A), pointB: orig(pts.B), lengthM: length, notStretched: true }
         : null;
-  const scaleNote = !scale
-    ? "No scale yet: click two points whose real distance you know and enter it, or enter the real width of the whole image."
-    : scale.lengthM
-      ? `${(pickedPx / upload.previewScale / scale.lengthM).toFixed(1)} px per metre from your known length (most reliable).`
-      : `${(upload.originalWidth / scale.imageWidthM).toFixed(1)} px per metre from the image width (check it against a known length).`;
+  const scaleNote = two
+    ? `Across ${two.xPxPerM.toFixed(2)} px/m · up-down ${two.yPxPerM.toFixed(2)} px/m · ` +
+      (two.stretchPct > 1
+        ? `the picture is stretched by ${two.stretchPct.toFixed(1)} %: it will be corrected.`
+        : "the picture is not stretched.")
+    : abOk && cdOk
+      ? "C-D must run in another direction than A-B (one across, one up-down)."
+      : abOk && notStretched
+        ? `${(abPx / length).toFixed(2)} px per metre from A-B, used both ways (you confirmed the picture is not stretched).`
+        : "Place A-B and C-D and type both real lengths (or tick that the picture is not stretched).";
 
   const detect = async (givenScale = scale, target = upload) => {
     setError("");
@@ -116,6 +143,28 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
       });
       setResult(done);
       setView("overlay.png");
+      // sizes printed on the drawing: A-B and C-D are placed on their dimension lines for you to check (only on
+      // the first run of a picture, never over points you placed)
+      if (!givenScale) {
+        const found = pointsFromPrinted(done.scale?.printedLines);
+        const toPv = (p) => p.map((v) => Math.round(v * target.previewScale));
+        if (found.ab || found.cd) {
+          setPts((cur) => {
+            if (Object.keys(cur).length) return cur;
+            return {
+              ...(found.ab ? { A: toPv(found.ab.a), B: toPv(found.ab.b) } : {}),
+              ...(found.cd ? { C: toPv(found.cd.a), D: toPv(found.cd.b) } : {}),
+            };
+          });
+          if (found.ab) setKnownLength((v) => v || String(found.ab.metres));
+          if (found.cd) setKnownHeight((v) => v || String(found.cd.metres));
+          setPrintedNote(
+            "Found on the drawing: " +
+              [found.ab && `${found.ab.text} across (A-B)`, found.cd && `${found.cd.text} up-down (C-D)`].filter(Boolean).join(" and ") +
+              ". The points are placed on those dimension lines: check that each sits on the line's end marks (drag to adjust), then press Apply.",
+          );
+        }
+      }
     } catch (e) {
       setError(e.message);
     } finally {
@@ -168,7 +217,7 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
       );
       const { review } = converted;
       setMessage(
-        `Added ${converted.rooms.length} rooms, ${converted.doors.length} doors, ${converted.windows.length} windows` +
+        `Added ${converted.rooms.length} rooms, ${converted.interiorWalls.length} walls, ${converted.doors.length} doors, ${converted.windows.length} windows` +
           (Object.keys(converted.furnitureCounts || {}).length
             ? `, ${Object.entries(converted.furnitureCounts).map(([k, n]) => `${n} ${k}`).join(", ")}`
             : "") +
@@ -176,6 +225,8 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
           `${review.rooms + review.openings + review.walls} item(s) are marked for review (orange dashes). ` +
           "Use the Picture button in the toolbar to show or hide your imported picture.",
       );
+      // the drawing is shown under the imported walls, so every wall can be checked against it
+      showImage?.();
       setTab("design");
     } catch (e) {
       setError(e.message);
@@ -192,7 +243,7 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
         Upload a PNG, JPG or PDF plan. Walls, doors, windows and rooms are found
         automatically on this computer with free open-source tools (no cloud
         service, no key). The scale is taken from the drawing when it prints
-        enough readable sizes; otherwise you give one known length. Check the
+        sizes (you check where it was read); otherwise you give two known lengths, one across and one up-down. Check the
         result and correct it in the editor.
       </p>
       <label className="upload">
@@ -279,8 +330,16 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
                 ? "Read by the classical method with the learned model's walls added."
                 : "Read by the classical method (no model)."}
           </small>
+          {result.quality && (
+            <p className={result.quality.modelWallsCoveredPct < 85 || result.quality.resolutionOk === false ? "warn" : "panel-note"}>
+              {Number.isFinite(result.quality.modelWallsCoveredPct) &&
+                `Walls matched to the drawing: ${result.quality.modelWallsCoveredPct}% of the walls the model sees in the building. `}
+              {Number.isFinite(result.quality.cmPerPixel) &&
+                `Picture detail: ${result.quality.cmPerPixel} cm per pixel${result.quality.resolutionOk === false ? " (too coarse: thin walls and small gaps can be missed; ask for a larger PNG, at least 20 px per metre)" : " (good)"}.`}
+            </p>
+          )}
           <small className="hint">
-            Wall thickness ≈ {result.wallThickness.m} m · scale {result.scale.source} ·
+            Drawn wall width ≈ {result.wallThickness.m} m (the line on the drawing, not always the real wall) · scale {result.scale.source} ·
             straightened by {result.image.deskewDeg}° · {m.totalSeconds}s on the CPU, peak{" "}
             {m.peakRamMB} MB RAM.
           </small>
@@ -310,8 +369,8 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
           </label>
           <button
             className="primary"
-            disabled={Boolean(busy) || !result.scale.pxPerM}
-            title={result.scale.pxPerM ? "" : "Give one known length below first"}
+            disabled={Boolean(busy) || !result.scale.pxPerM || !result.scale.confirmed}
+            title={result.scale.pxPerM && result.scale.confirmed ? "" : "Confirm the scale below first (A-B and C-D, then Apply)"}
             onClick={useInEditor}
           >
             Use in the editor
@@ -322,32 +381,35 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
       {upload && result && (
         <section className="scale-step">
           <h3>Scale</h3>
-          {result.scale.pxPerM ? (
+          {result.scale.pxPerM && result.scale.confirmed ? (
             <p className="panel-note">
-              Scale: {result.scale.pxPerM.toFixed(1)} px per metre ({result.scale.source}).
-              {result.scale.confidence < 1
-                ? " Not from a length you gave: check it against one known length below."
+              Scale confirmed: {result.scale.pxPerM.toFixed(1)} px per metre ({result.scale.source}).
+              {result.scale.twoLengths && result.scale.twoLengths.stretchPct > 1
+                ? ` The picture was stretched by ${result.scale.twoLengths.stretchPct.toFixed(1)} % and has been corrected.`
                 : ""}
             </p>
           ) : (
             <p className="panel-note">
-              <strong>One known length is needed.</strong> This drawing does not print enough readable
-              sizes to find the scale itself. Follow the three steps below: mark two points A and B whose real distance you
-              know (the ends of a dimension line, a wall you have measured), then type it.
+              <strong>Confirm the scale both ways before the plan is used.</strong> A picture can be stretched (resized
+              without keeping its proportions): then one length gets the sizes across right but every size up-down wrong.
+              Give two lengths you know: <b>A-B across</b> and <b>C-D up-down</b> (the ends of the dimension lines, or
+              walls you have measured).
+              {result.scale.pxPerM ? ` Found so far: ${result.scale.pxPerM.toFixed(1)} px per metre (${result.scale.source}), not yet confirmed.` : ""}
             </p>
           )}
+          {printedNote && <p className="panel-note">{printedNote}</p>}
           <ol className="calibrate-steps">
-            <li className={points.length === 0 ? "now" : "done"}>
-              Click one end of a length you know on the plan below: point <b>A</b>.
+            <li className={pts.A && pts.B ? "done" : "now"}>
+              Click both ends of a length you know across the plan: points <b>A</b> and <b>B</b>.
             </li>
-            <li className={points.length === 1 ? "now" : points.length > 1 ? "done" : ""}>
-              Click the other end: point <b>B</b>.
+            <li className={notStretched ? "done" : pts.C && pts.D ? "done" : pts.A && pts.B ? "now" : ""}>
+              Click both ends of a length you know up-down: points <b>C</b> and <b>D</b>.
             </li>
-            <li className={points.length === 2 ? "now" : ""}>
-              Type the real distance between A and B (in metres) in the box under the plan.
+            <li className={(pts.A && pts.B && (notStretched || (pts.C && pts.D))) ? "now" : ""}>
+              Type both real lengths (metres) under the plan and press <b>Apply this scale</b>. Drag a point to move it.
             </li>
           </ol>
-          <div className="calibrate">
+          <div className="calibrate" onPointerMove={drag} onPointerUp={() => setDragging(null)} onPointerLeave={() => setDragging(null)}>
             <img
               ref={imageRef}
               src={fileUrl(upload.id, "preview.png")}
@@ -361,67 +423,89 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
               preserveAspectRatio="none"
               aria-hidden="true"
             >
-              {points.length === 2 && (
-                <line
-                  x1={points[0][0]}
-                  y1={points[0][1]}
-                  x2={points[1][0]}
-                  y2={points[1][1]}
-                  stroke="#dc2626"
-                  strokeWidth={Math.max(2, upload.width / 400)}
-                  vectorEffect="non-scaling-stroke"
-                />
+              {[["A", "B", "#dc2626"], ["C", "D", "#2563eb"]].map(([p, q, colour]) =>
+                pts[p] && pts[q] && !(p === "C" && notStretched) ? (
+                  <line
+                    key={p}
+                    x1={pts[p][0]}
+                    y1={pts[p][1]}
+                    x2={pts[q][0]}
+                    y2={pts[q][1]}
+                    stroke={colour}
+                    strokeWidth={Math.max(2, upload.width / 400)}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ) : null,
               )}
             </svg>
-            {points.map((p, i) => (
+            {POINT_KEYS.filter((key) => pts[key] && !(notStretched && (key === "C" || key === "D"))).map((key) => (
               <span
-                key={i}
-                className="calibrate-dot"
+                key={key}
+                className={`calibrate-dot drag${key === "C" || key === "D" ? " cd" : ""}`}
                 style={{
-                  left: `${(100 * p[0]) / upload.width}%`,
-                  top: `${(100 * p[1]) / upload.height}%`,
+                  left: `${(100 * pts[key][0]) / upload.width}%`,
+                  top: `${(100 * pts[key][1]) / upload.height}%`,
                 }}
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  setDragging(key);
+                }}
+                title={`Drag to move point ${key}`}
               >
-                {"AB"[i]}
+                {key}
               </span>
             ))}
           </div>
           <div className="calibrate-status">
-            {points.length === 0 && "Waiting for point A: click on the plan."}
-            {points.length === 1 && "Point A is placed. Now click point B."}
-            {points.length === 2 && (
+            {!pts.A && "Waiting for point A: click on the plan."}
+            {pts.A && !pts.B && "Point A is placed. Now click point B."}
+            {pts.A && pts.B && !notStretched && !pts.C && "A-B is placed. Now click point C (one end of an up-down length)."}
+            {pts.C && !pts.D && !notStretched && "Point C is placed. Now click point D."}
+            {pts.A && pts.B && (
               <>
-                A and B are placed ({Math.round(pickedPx / upload.previewScale)} px apart).{" "}
-                <button type="button" onClick={() => setPoints([])}>
-                  Pick again
+                {" "}A-B {Math.round(abPx)} px
+                {!notStretched && pts.C && pts.D ? ` · C-D ${Math.round(cdPx)} px` : ""}.
+                <button type="button" onClick={() => setPts((cur) => ({ C: cur.C, D: cur.D }))}>
+                  Pick A-B again
                 </button>
+                {!notStretched && pts.C && (
+                  <button type="button" onClick={() => setPts((cur) => ({ A: cur.A, B: cur.B }))}>
+                    Pick C-D again
+                  </button>
+                )}
               </>
             )}
           </div>
           <div className="form-grid">
             <label className="field">
-              <span>Real distance between A and B (m)</span>
+              <span>Real length A-B, across (m)</span>
               <input
                 type="number"
                 min="0"
                 step="any"
-                placeholder={points.length < 2 ? "place A and B first" : "e.g. 4.52"}
+                placeholder={pts.A && pts.B ? "e.g. 190" : "place A and B first"}
                 value={knownLength}
                 onChange={(e) => setKnownLength(e.target.value)}
-                disabled={points.length < 2}
+                disabled={!(pts.A && pts.B)}
               />
             </label>
             <label className="field">
-              <span>or real width of the whole image (m)</span>
+              <span>Real length C-D, up-down (m)</span>
               <input
                 type="number"
                 min="0"
                 step="any"
-                value={imageWidthM}
-                onChange={(e) => setImageWidthM(e.target.value)}
+                placeholder={notStretched ? "not needed" : pts.C && pts.D ? "e.g. 80" : "place C and D first"}
+                value={knownHeight}
+                onChange={(e) => setKnownHeight(e.target.value)}
+                disabled={notStretched || !(pts.C && pts.D)}
               />
             </label>
           </div>
+          <label className="check">
+            <input type="checkbox" checked={notStretched} onChange={(e) => setNotStretched(e.target.checked)} />{" "}
+            I have no up-down length: I confirm the picture is not stretched (A-B is used both ways)
+          </label>
           <small className="hint">{scaleNote}</small>
           <button className="primary" disabled={Boolean(busy) || !scale} onClick={() => detect(scale)}>
             Apply this scale

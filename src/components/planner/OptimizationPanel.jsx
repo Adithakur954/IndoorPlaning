@@ -188,6 +188,28 @@ export default function OptimizationPanel({
                 </button>
               ))}
             </div>
+            {!(reuse && !settings.allowNewAps) && (
+              <label className="field">
+                <span>{reuse ? "Most extra APs (optional)" : "Most new APs (optional)"}</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  placeholder="no limit"
+                  value={settings.capNewAps ?? ""}
+                  onChange={(e) =>
+                    patch({
+                      capNewAps: e.target.value === "" ? null : Math.max(0, Math.round(Number(e.target.value) || 0)),
+                    })
+                  }
+                />
+              </label>
+            )}
+            <small className="hint">
+              Leave the limit empty to see how many APs the target needs. New APs go to the worst areas first (red
+              before yellow), and one is only added when it covers at least 1% more of the floor. It stops at the
+              target, at your limit, or when no AP is worth adding, and says which.
+            </small>
           </>
         ) : reuse && !settings.allowNewAps ? (
           <small className="hint">
@@ -202,6 +224,12 @@ export default function OptimizationPanel({
             onChange={(v) => patch({ budget: Math.max(0, Math.round(v)) })}
           />
         )}
+        {settings.objective === "max-coverage" && !(reuse && !settings.allowNewAps) && (
+          <small className="hint">
+            The most APs it may use: each one is only added when it covers at least 1% more of the floor, so it can
+            use fewer and says how many were not needed.
+          </small>
+        )}
         <Field
           label="APs reaching each point"
           type="number"
@@ -210,6 +238,12 @@ export default function OptimizationPanel({
             patch({ redundancy: Math.min(4, Math.max(1, Math.round(v))) })
           }
         />
+        {settings.redundancy > 1 && (
+          <small className="warn">
+            ⚠ {settings.redundancy} APs must reach every point: a spot with one good AP still counts as not covered,
+            so far more APs are added (often close together). Use 1 unless you need backup coverage.
+          </small>
+        )}
       </section>
 
       {wifiAps.length > 0 && (
@@ -280,8 +314,19 @@ export default function OptimizationPanel({
               })
             }
           />
-          Wall-mounted (height {settings.wallHeightM} m)
+          Wall-mounted
         </label>
+        {settings.mounting.wall && (
+          <div className="inspector-fields mount-height">
+            <Field
+              label="Wall mounting height (m)"
+              type="number"
+              min="0"
+              value={settings.wallHeightM}
+              onChange={(v) => patch({ wallHeightM: Math.max(0, v) })}
+            />
+          </div>
+        )}
         <label className="check">
           <input
             type="checkbox"
@@ -294,18 +339,29 @@ export default function OptimizationPanel({
           />
           Ceiling-mounted
         </label>
+        {settings.mounting.ceiling && (
+          <>
+            <div className="inspector-fields mount-height">
+              <Field
+                label="Below the ceiling (m)"
+                type="number"
+                min="0"
+                value={settings.ceilingDropM}
+                onChange={(v) => patch({ ceilingDropM: Math.max(0, v) })}
+              />
+            </div>
+            <small className="hint">
+              Ceiling APs sit at each room's own ceiling height (room property
+              “Height”) minus this.
+            </small>
+          </>
+        )}
         <small className="hint">
           Rooms can be excluded from mounting in their properties (AP mounting).
         </small>
         <details>
           <summary>Spacing and clearance</summary>
           <div className="inspector-fields">
-            <Field
-              label="Wall height (m)"
-              type="number"
-              value={settings.wallHeightM}
-              onChange={(v) => patch({ wallHeightM: v })}
-            />
             <Field
               label="Wall spacing (m)"
               type="number"
@@ -546,8 +602,18 @@ function OptimizationResults({ plan, o, setSelectedFloor }) {
       <p className={outcome.targetAchieved ? "ok" : "warn"}>
         {outcome.message}
       </p>
+      {o.applied && !o.stale && (
+        <p className="ok">
+          Applied to the plan: these {opt.settingsUsed.band} GHz APs are now in your plan. Undo apply takes them out
+          again. {Object.keys(o.altRuns).length > 1 ? "The other band's result is still valid and can be applied too." : ""}
+        </p>
+      )}
       {o.stale && (
-        <p className="error">The plan changed after this run. Run it again.</p>
+        <p className="error">
+          {o.applied
+            ? "The building changed after this run (walls, rooms or materials). Run it again."
+            : `The building or your existing ${opt.settingsUsed.band} GHz APs changed after this run. Run it again.`}
+        </p>
       )}
       {o.modelOutdated && (
         <p className="error">
@@ -815,6 +881,7 @@ function BandComparison({ o }) {
                   disabled={o.busy} onClick={() => o.chooseBand(band)}>
                   {band} GHz{band === best ? " ★" : ""}
                 </button>
+                {o.appliedBands?.includes(band) && <small className="hint"> applied</small>}
               </td>
               <td>
                 {r.result.outcome.existingApCount

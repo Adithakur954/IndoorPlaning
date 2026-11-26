@@ -19,7 +19,8 @@ reports.
 | AP optimisation | Fewest APs for a coverage target, or best coverage for an AP budget. Works with or without existing APs, keeps, moves or removes existing ones, and runs each selected band (2.4 / 5 / 6 GHz) separately with a comparison and a recommendation. Reports the result against your existing layout and warns when it is worse. |
 | Measurements | Import drive-test or survey logs (`.csv`, `.xlsx`, ZIP), choose a KPI, edit threshold colours, overlay on the plan. Geographic alignment included. |
 | Reports | Word (`.docx`) single-band design report and a 2.4 GHz vs 5 GHz comparison report with building measurements, coverage, SNR, rooms, weak zones and recommendations. |
-| Licensing | Offline, machine-bound, signed licenses. No licensing server. |
+| Wi-Fi cabling | Racks, cable routes, pathways (ceiling, walls, trays, no-go areas), switches and PoE, fibre uplinks, capacity planning, equipment list, compliance table, Excel and PowerPoint. See [docs/WIFI_CABLING.md](docs/WIFI_CABLING.md). |
+| Licensing | Offline, machine-bound, signed licenses. No licensing server. A license can list the modules it unlocks. |
 
 ## Architecture
 
@@ -155,6 +156,8 @@ cd service; cargo test                         # service tests
 | [docs/RAY_TRACING.md](docs/RAY_TRACING.md) | Prediction, optimisation, model assumptions and limits |
 | [docs/REPORT.md](docs/REPORT.md) | Word report contents |
 | [docs/FLOORPLAN_RECONSTRUCTION.md](docs/FLOORPLAN_RECONSTRUCTION.md) | Image to building, scope and limits |
+| [docs/WIFI_CABLING.md](docs/WIFI_CABLING.md) | Wi-Fi cabling design |
+| [docs/WIFI_CABLING_ACCEPTANCE.md](docs/WIFI_CABLING_ACCEPTANCE.md) | Acceptance criteria and what is not yet proven |
 | [docs/PROJECT_STORAGE.md](docs/PROJECT_STORAGE.md) | Database schema |
 | [docs/LICENSING.md](docs/LICENSING.md) | Offline licensing |
 | [docs/WINDOWS_INSTALLER.md](docs/WINDOWS_INSTALLER.md) | Installer build |
@@ -164,4 +167,4 @@ cd service; cargo test                         # service tests
 - Diffraction and diffuse scattering are off by default; very low frequencies and sharp corners will be less accurate.
 - Floor-plan import recovers approximate geometry, not CAD-grade dimensions. Review the result against the underlay before using it for RF design.
 - The optimiser's screening step uses coarse ray tracing to rank candidates; the reported coverage comes from the final full-resolution run.
-- Cellular (IBS/DAS) planning, cable routing and a bill of materials are not implemented.
+- Cellular (IBS/DAS) planning is a separate add-on that is not part of the Wi-Fi feature set. Wi-Fi cabling is a planning estimate and is not validated on real buildings yet (see the acceptance criteria).

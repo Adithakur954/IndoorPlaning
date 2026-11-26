@@ -25,13 +25,21 @@ sys.path.insert(0, HERE)
 import train_seg as T  # noqa: E402
 
 COLORS = np.array([[0, 0, 0], [60, 60, 220], [60, 190, 60], [220, 140, 40], [150, 235, 240], [200, 60, 170], [0, 140, 255],
-                   [0, 200, 255], [255, 110, 20], [180, 200, 0], [120, 0, 160], [60, 170, 60], [0, 90, 200], [150, 150, 150]], np.uint8)  # BGR  # BGR
+                   [0, 200, 255], [255, 110, 20], [180, 200, 0], [120, 0, 160], [60, 170, 60], [0, 90, 200], [150, 150, 150],
+                   [220, 60, 180], [130, 130, 255]], np.uint8)  # BGR; the last two: stairs, void (run 6)
 
 
 def load_model(path, device):
+    """A trained model that returns class scores only (a run-6 centre-line channel is cut off), for evaluation
+    and ONNX export."""
     ck = torch.load(path, map_location=device)
-    model = T.make_model(ck["encoder"], ck.get("n_classes", 6)).to(device).to(memory_format=torch.channels_last)
+    n = ck.get("n_classes", 6)
+    extra = 1 if ck.get("centreline") else 0
+    model = T.make_model(ck["encoder"], n + extra).to(device).to(memory_format=torch.channels_last)
     model.load_state_dict(ck["model"])
+    if extra:
+        model = T.ClassLogits(model, n).to(device)
+    model.n_classes = n
     return model.eval(), ck
 
 

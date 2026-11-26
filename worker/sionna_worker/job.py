@@ -118,6 +118,9 @@ class OptimizeJob:
     shortlist_per_room: int = 3
     batch_size: int = 16
     min_ap_separation_m: float = 3.0
+    # an AP is only added when it covers at least this share of the target area (or fixes a weak zone's worst
+    # part): a budget of 50 is a maximum, not a quota, and no AP is added for a crumb of coverage
+    min_ap_gain_pct: float = 1.0
     room_overrides: dict = field(default_factory=dict)
     include_common_area: bool = True
     refraction: bool = True
@@ -203,6 +206,7 @@ class OptimizeJob:
         number("shortlist_per_room", 0, 50)
         number("batch_size", 1, 256)
         number("min_ap_separation_m", 0, 50)
+        number("min_ap_gain_pct", 0, 50)
         number("receiver_gain_dbi", -20, 30)
         number("cache_max_mb", 0, 100_000)
         if self.receiver_height_m is not None:

@@ -23,7 +23,7 @@ export const REJECTION_REASONS = {
   excludedRoom: "room is excluded from AP mounting",
   excludedWall: "wall is marked not mountable",
   furniture: "blocked by furniture",
-  outside: "outside the building",
+  outside: "outside the building (or in a room standing apart from it)",
   wallClearance: "too close to a wall for ceiling mounting",
 };
 
@@ -41,11 +41,72 @@ const distToSegment = (p, a, b) => {
 
 const round = (v) => Math.round(v * 100) / 100;
 
+const polygonArea = (shape) => {
+  const pts = pointsOf(shape);
+  let a = 0;
+  pts.forEach((p, i) => {
+    const q = pts[(i + 1) % pts.length];
+    a += p.x * q.z - q.x * p.z;
+  });
+  return Math.abs(a) / 2;
+};
+
+// The building an AP may be mounted in (what Hamina calls the in-scope zone). With a drawn building outline,
+// that outline. Without one, the rooms joined to the largest room (an imported plan's "Floor" and everything
+// touching it), plus any other group of joined rooms at least a tenth of its size (a separate wing). A small
+// room standing on its own (a mark on the road or the site that the import read as a room) is outside: no
+// position is offered there. Returns { areas, outsideRoomIds }.
+export function buildingScope(plan, floorId, touchM = 1.0) {
+  const rooms = plan.rooms.filter((r) => r.floorId === floorId);
+  const outlines = boundaryAreas(plan, floorId);
+  if (outlines.length) {
+    const inOutline = (r) => {
+      const b = bbox(r);
+      return outlines.some((o) => inside((b.minX + b.maxX) / 2, (b.minZ + b.maxZ) / 2, o));
+    };
+    return { areas: outlines, outsideRoomIds: new Set(rooms.filter((r) => !inOutline(r)).map((r) => r.id)) };
+  }
+  if (!rooms.length) return { areas: [], outsideRoomIds: new Set() };
+  const boxes = rooms.map((r) => bbox(r));
+  const near = (i, j) =>
+    boxes[i].minX - touchM <= boxes[j].maxX &&
+    boxes[j].minX - touchM <= boxes[i].maxX &&
+    boxes[i].minZ - touchM <= boxes[j].maxZ &&
+    boxes[j].minZ - touchM <= boxes[i].maxZ;
+  // groups of rooms that touch each other
+  const group = rooms.map(() => -1);
+  let groups = 0;
+  for (let i = 0; i < rooms.length; i++) {
+    if (group[i] >= 0) continue;
+    const stack = [i];
+    group[i] = groups;
+    while (stack.length) {
+      const a = stack.pop();
+      for (let j = 0; j < rooms.length; j++)
+        if (group[j] < 0 && near(a, j)) {
+          group[j] = groups;
+          stack.push(j);
+        }
+    }
+    groups += 1;
+  }
+  const size = Array(groups).fill(0);
+  rooms.forEach((r, i) => (size[group[i]] += polygonArea(r)));
+  const biggest = Math.max(...size);
+  const keepGroup = size.map((a) => a >= 0.1 * biggest);
+  return {
+    areas: rooms.filter((_, i) => keepGroup[group[i]]),
+    outsideRoomIds: new Set(rooms.filter((_, i) => !keepGroup[group[i]]).map((r) => r.id)),
+  };
+}
+
 export function generateCandidates(plan, floorId, userOptions = {}) {
   const o = { ...DEFAULT_CANDIDATE_OPTIONS, ...userOptions };
   const rooms = plan.rooms.filter((r) => r.floorId === floorId);
   const outlines = boundaryAreas(plan, floorId);
-  const areas = [...rooms, ...outlines];
+  // only inside the building: rooms standing apart from it are not offered (see buildingScope)
+  const scope = buildingScope(plan, floorId);
+  const areas = scope.areas.length ? scope.areas : [...rooms, ...outlines];
   const doors = plan.doors.filter((d) => d.floorId === floorId);
   const windows = plan.windows.filter((w) => w.floorId === floorId);
   const furniture = plan.furniture.filter((f) => f.floorId === floorId);
@@ -90,6 +151,7 @@ export function generateCandidates(plan, floorId, userOptions = {}) {
   }
 
   const roomOk = (room) => room?.apMounting !== "excluded";
+  const roomInScope = (room) => !room || !scope.outsideRoomIds.has(room.id);
 
   // ---- wall surfaces ------------------------------------------------------
   const surfaces = [];
@@ -162,7 +224,7 @@ export function generateCandidates(plan, floorId, userOptions = {}) {
             roomName: room?.name ?? "Common area",
             wallSide: s.side,
           };
-          if (!insideBuilding(pos.x, pos.z)) {
+          if (!insideBuilding(pos.x, pos.z) || !roomInScope(room)) {
             reject(cand, "outside");
             continue;
           }
@@ -243,6 +305,10 @@ export function generateCandidates(plan, floorId, userOptions = {}) {
             roomName: host?.name ?? "Common area",
             wallSide: "",
           };
+          if (!roomInScope(host) || !insideBuilding(x, z)) {
+            reject(cand, "outside");
+            continue;
+          }
           if (host && !roomOk(host)) {
             reject(cand, "excludedRoom");
             continue;

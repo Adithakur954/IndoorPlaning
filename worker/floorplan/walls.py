@@ -202,6 +202,130 @@ def _diagonal_segments(mask: np.ndarray, orth: np.ndarray, thickness: float, min
     return walls
 
 
+def _thin_runs(ink: np.ndarray, min_len: int, max_thick: float, horizontal: bool) -> list[Wall]:
+    """Straight runs of ink at least `min_len` long and at most `max_thick` wide."""
+    k = (min_len, 1) if horizontal else (1, min_len)
+    opened = cv2.morphologyEx(ink, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, k))
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(opened, connectivity=8)
+    out: list[Wall] = []
+    for i in range(1, count):
+        x, y, w, h, area = stats[i]
+        length, across = (w, h) if horizontal else (h, w)
+        if length < min_len:
+            continue
+        thick = area / max(length, 1)
+        if thick > max_thick:
+            continue
+        if horizontal:
+            yc = _mean_coordinate(labels, i, x, y, w, h, axis=0)
+            out.append(Wall((float(x), yc), (float(x + w), yc), thick, orientation="h"))
+        else:
+            xc = _mean_coordinate(labels, i, x, y, w, h, axis=1)
+            out.append(Wall((xc, float(y)), (xc, float(y + h)), thick, orientation="v"))
+    return out
+
+
+def _thin_diagonals(ink: np.ndarray, orth: list[Wall], min_len: int) -> list[Wall]:
+    """Slanted straight lines (an octagonal hall, a chamfered corner) that the
+    horizontal and vertical passes did not explain."""
+    left = ink.copy()
+    for w in orth:
+        cv2.line(left, (int(w.a[0]), int(w.a[1])), (int(w.b[0]), int(w.b[1])), 0, max(3, int(w.thickness) + 4))
+    skeleton = skeletonize(left > 0).astype(np.uint8) * 255
+    lines = cv2.HoughLinesP(skeleton, 1, np.pi / 180, threshold=max(10, min_len // 2),
+                            minLineLength=min_len, maxLineGap=3)
+    if lines is None:
+        return []
+    segs: list[tuple[float, float, float, float, float]] = []
+    for x1, y1, x2, y2 in np.asarray(lines).reshape(-1, 4):
+        ang = math.degrees(math.atan2(y2 - y1, x2 - x1)) % 180
+        if min(ang, 180 - ang) < 10 or abs(ang - 90) < 10:
+            continue            # near-orthogonal: already read by the straight passes
+        segs.append((float(x1), float(y1), float(x2), float(y2), ang))
+    segs.sort(key=lambda s: -math.hypot(s[2] - s[0], s[3] - s[1]))
+    kept: list[tuple[float, float, float, float, float]] = []
+    for s in segs:            # one wall per drawn line: drop near duplicates
+        mx, my = (s[0] + s[2]) / 2, (s[1] + s[3]) / 2
+        dup = False
+        for k in kept:
+            if abs(((s[4] - k[4]) + 90) % 180 - 90) > 4:
+                continue
+            dx, dy = k[2] - k[0], k[3] - k[1]
+            ln = math.hypot(dx, dy)
+            dist = abs(dy * (mx - k[0]) - dx * (my - k[1])) / max(ln, 1e-6)
+            t = ((mx - k[0]) * dx + (my - k[1]) * dy) / max(ln * ln, 1e-6)
+            if dist <= 4 and -0.1 <= t <= 1.1:
+                dup = True
+                break
+        if not dup:
+            kept.append(s)
+    return [Wall((s[0], s[1]), (s[2], s[3]), 2.0, confidence=0.5, orientation="d",
+                 notes=["slanted line read as a wall (check it)"]) for s in kept]
+
+
+def thin_line_walls(ink: np.ndarray, min_len: int, max_thick: float,
+                    exclude_boxes: list[np.ndarray] | None = None,
+                    dimension_boxes: list[np.ndarray] | None = None) -> list[Wall]:
+    """Walls drawn as single thin lines (common in presentation plans, where every
+    wall is a 1-3 px line). The thick-stroke reading drops these on purpose, so
+    they are read here: every long straight line is a wall, except
+    - hatching and stair treads (a family of close parallel lines),
+    - dimension lines (a printed size runs along them),
+    - the frame of the sheet (a line on the image border)."""
+    h, w = ink.shape
+    src = ink.copy()
+    for box in exclude_boxes or []:
+        cv2.fillPoly(src, [box.astype(np.int32)], 0)
+    runs = _thin_runs(src, min_len, max_thick, True) + _thin_runs(src, min_len, max_thick, False)
+
+    def pos(wl):
+        return wl.a[1] if wl.orientation == "h" else wl.a[0]
+
+    def span(wl):
+        return sorted((wl.a[0], wl.b[0])) if wl.orientation == "h" else sorted((wl.a[1], wl.b[1]))
+
+    hatch: set[int] = set()
+    for i, wi in enumerate(runs):
+        lo, hi = span(wi)
+        close = 0
+        for j, wj in enumerate(runs):
+            if i == j or wj.orientation != wi.orientation or abs(pos(wj) - pos(wi)) > 12:
+                continue
+            lo2, hi2 = span(wj)
+            if min(hi, hi2) - max(lo, lo2) >= 0.5 * min(hi - lo, hi2 - lo2):
+                close += 1
+        if close >= 2:
+            hatch.add(i)
+    dims = []
+    for box in dimension_boxes or []:
+        xs, ys = box[:, 0], box[:, 1]
+        dims.append((float(xs.mean()), float(ys.mean()), float(max(xs.max() - xs.min(), ys.max() - ys.min()))))
+    kept: list[Wall] = []
+    for i, wl in enumerate(runs):
+        if i in hatch:
+            continue
+        lo, hi = span(wl)
+        p = pos(wl)
+        edge = (wl.orientation == "h" and (p < 4 or p > h - 4)) or (wl.orientation == "v" and (p < 4 or p > w - 4))
+        if edge:
+            continue
+        is_dim = False
+        for cx, cy, size in dims:
+            along, off = (cx, cy - p) if wl.orientation == "h" else (cy, cx - p)
+            if lo <= along <= hi and abs(off) <= max(1.2 * size / 3, 14):
+                is_dim = True
+                break
+        if is_dim:
+            continue
+        wl.notes.append("drawn as a thin line")
+        wl.thin = True  # type: ignore[attr-defined]
+        kept.append(wl)
+    diagonals = _thin_diagonals(src, runs, min_len)
+    for d in diagonals:
+        d.thin = True  # type: ignore[attr-defined]
+    return kept + diagonals
+
+
 def extract_segments(mask: np.ndarray, thickness: float, min_length_px: int) -> list[Wall]:
     walls = _segments_one_direction(mask, min_length_px, True)
     walls += _segments_one_direction(mask, min_length_px, False)
@@ -331,6 +455,63 @@ def snap_junctions(walls: list[Wall], tol: float) -> list[Wall]:
     return walls
 
 
+def close_corners(walls: list[Wall], tol: float, max_gap: float) -> int:
+    """An L corner left open: a horizontal and a vertical wall that both stop
+    short of the point where they would meet (within `max_gap` each) are carried
+    on to that point, so the room closes. Returns how many corners were closed."""
+    def free(p, skip):
+        for j, o in enumerate(walls):
+            if j == skip:
+                continue
+            if o.orientation == "h":
+                lo, hi = sorted((o.a[0], o.b[0]))
+                if lo - tol <= p[0] <= hi + tol and abs(p[1] - o.a[1]) <= tol:
+                    return False
+            elif o.orientation == "v":
+                lo, hi = sorted((o.a[1], o.b[1]))
+                if lo - tol <= p[1] <= hi + tol and abs(p[0] - o.a[0]) <= tol:
+                    return False
+        return True
+
+    hs = [(i, w) for i, w in enumerate(walls) if w.orientation == "h"]
+    vs = [(i, w) for i, w in enumerate(walls) if w.orientation == "v"]
+    closed = 0
+    for i, h in hs:
+        for he in (0, 1):
+            ph = h.a if he == 0 else h.b
+            if not free(ph, i):
+                continue
+            best = None
+            for j, v in vs:
+                for ve in (0, 1):
+                    pv = v.a if ve == 0 else v.b
+                    corner = (pv[0], ph[1])
+                    dh, dv = abs(corner[0] - ph[0]), abs(corner[1] - pv[1])
+                    if dh > max_gap or dv > max_gap or not free(pv, j):
+                        continue
+                    # each wall must grow outwards from its own end, never back over itself
+                    qh = h.b if he == 0 else h.a
+                    qv = v.b if ve == 0 else v.a
+                    if (corner[0] - ph[0]) * (ph[0] - qh[0]) < 0 or (corner[1] - pv[1]) * (pv[1] - qv[1]) < 0:
+                        continue
+                    if best is None or dh + dv < best[0]:
+                        best = (dh + dv, j, ve, corner)
+            if best is None:
+                continue
+            _, j, ve, corner = best
+            if he == 0:
+                h.a = corner
+            else:
+                h.b = corner
+            v = walls[j]
+            if ve == 0:
+                v.a = corner
+            else:
+                v.b = corner
+            closed += 1
+    return closed
+
+
 def drop_short_and_dupes(walls: list[Wall], min_len: float) -> list[Wall]:
     kept = [w for w in walls if w.length >= min_len]
     return kept
@@ -366,10 +547,13 @@ def drop_small_components(ink: np.ndarray, max_side_px: float) -> np.ndarray:
 
 
 def extend_free_ends(walls: list[Wall], thickness: float, max_extend: float,
-                     evidence: np.ndarray | None = None, discs: list[tuple[float, float, float]] | None = None) -> int:
+                     evidence: np.ndarray | None = None, discs: list[tuple[float, float, float]] | None = None,
+                     free_px: float = 0.0) -> int:
     """A wall that stops just short of another wall (a marker or a symbol was
     drawn over the join) is carried on to it when the stretch in between is
-    covered by drawn strokes or lies under a marker. Returns how many ends moved."""
+    covered by drawn strokes or lies under a marker. A gap of at most `free_px`
+    (a corner the detection left open) is closed without that evidence.
+    Returns how many ends moved."""
     discs = discs or []
     moved = 0
     tol = max(1.5 * thickness, 4.0)
@@ -431,7 +615,7 @@ def extend_free_ends(walls: list[Wall], thickness: float, max_extend: float,
                     under += 1
                 if evidence is not None and 0 <= int(y) < evidence.shape[0] and 0 <= int(x) < evidence.shape[1]                         and evidence[int(y), int(x)]:
                     covered += 1
-            if (covered + under) / steps >= 0.6:
+            if d <= free_px or (covered + under) / steps >= 0.6:
                 target = walls[j].a[0] if horizontal else walls[j].a[1]
                 if horizontal:
                     new = (target, p[1])

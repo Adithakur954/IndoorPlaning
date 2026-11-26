@@ -4,6 +4,11 @@ candidate-coverage matrix. Pure NumPy; no ray tracing happens here.
 A receiver cell is covered when at least `k` distinct APs reach the cell's
 threshold. Power from different APs is never added: only whether each AP on
 its own reaches the threshold matters (strongest-AP coverage planning).
+
+Worst first: each cell also has a `priority` (how far its CURRENT signal is below the threshold). Choices are made
+on area x priority, so a new AP goes where it turns red into green before it turns nearly-good into good; a cell
+already at the threshold is worth nothing, so no AP is added only to make good areas better. The coverage % that
+is reported (and the target) is still plain area.
 """
 from __future__ import annotations
 
@@ -24,10 +29,14 @@ class Problem:
     # candidates that win a tie (an existing AP's own position): keeping an AP
     # where it is beats moving it for the same coverage
     prefer: np.ndarray | None = None
+    # (N,) >= 1: how much fixing this cell matters (worse current signal = higher); None = all equal
+    priority: np.ndarray | None = None
 
     def __post_init__(self):
         self.hit_f = self.hit.astype(np.float32)
         self.total_weight = float(self.weight.sum())
+        pr = np.ones_like(self.weight) if self.priority is None else np.asarray(self.priority, dtype=float)
+        self.value = (self.weight * pr).astype(np.float64)   # what the choices maximise
         if self.total_weight <= 0:
             raise ValueError("The coverage target has no area")
         diff = self.positions[:, None, :] - self.positions[None, :, :]
@@ -45,6 +54,10 @@ class Selection:
     baseline_pct: float
     max_possible_pct: float
     steps: list[dict] = field(default_factory=list)   # per added AP, in order
+    # stopped because the next AP would add less than the minimum useful gain: how many more APs (each under it)
+    # the target would still need, and the coverage they would reach (None when not computed)
+    more_needed: int | None = None
+    more_reach_pct: float | None = None
 
 
 def _counts(problem: Problem, indices: list[int]) -> np.ndarray:
@@ -66,7 +79,7 @@ def _gains(problem: Problem, counts: np.ndarray) -> np.ndarray:
     # newly-covered area.
     need = (counts < problem.k).astype(np.float32)
     progress = need * (1.0 + counts.astype(np.float32))
-    gains = problem.hit_f @ (problem.weight * progress).astype(np.float32)
+    gains = problem.hit_f @ (problem.value * progress).astype(np.float32)
     return _favour(problem, gains)
 
 
@@ -98,7 +111,7 @@ def select(
 
     selected: list[int] = []
     counts = problem.base_count.copy()
-    min_gain = min_gain_pct / 100.0 * problem.total_weight
+    min_gain = min_gain_pct / 100.0 * problem.total_weight   # (value >= weight: still at least this much area)
     status = "no-gain"
     while True:
         coverage = problem.coverage_pct(counts)
@@ -115,7 +128,7 @@ def select(
         gains[_blocked(problem, selected)] = -1
         best = int(np.argmax(gains))
         if gains[best] <= (-0.5 if forced else min_gain):
-            status = "no-gain"
+            status = "no-gain" if gains[best] <= 1e-9 * problem.total_weight else "low-gain"
             break
         selected.append(best)
         counts = counts + problem.hit[best]
@@ -131,6 +144,24 @@ def select(
         status = "infeasible"
     elif status == "target-met":
         status = "no-gain"
+    more_needed = more_reach = None
+    if status == "low-gain" and target_pct is not None:
+        # how far the target is: keep adding (without the minimum gain) and count, so the user can decide
+        extra, counts_x, chosen = 0, counts.copy(), list(selected)
+        while problem.coverage_pct(counts_x) < target_pct - 1e-9 and extra < 200:
+            if budget is not None and len(chosen) >= budget:
+                break
+            g = _gains(problem, counts_x)
+            g[~problem.allowed] = -1
+            g[chosen] = -1
+            g[_blocked(problem, chosen)] = -1
+            b = int(np.argmax(g))
+            if g[b] <= 1e-9:
+                break
+            chosen.append(b)
+            counts_x = counts_x + problem.hit[b]
+            extra += 1
+        more_needed, more_reach = extra, problem.coverage_pct(counts_x)
     return Selection(
         indices=selected,
         status=status,
@@ -138,6 +169,8 @@ def select(
         baseline_pct=baseline,
         max_possible_pct=max_possible,
         steps=_marginal_steps(problem, selected),
+        more_needed=more_needed,
+        more_reach_pct=more_reach,
     )
 
 
@@ -148,16 +181,16 @@ def _swap_refine(problem: Problem, selected: list[int], passes: int) -> list[int
         for pos in range(len(selected)):
             without = selected[:pos] + selected[pos + 1:]
             counts_wo = _counts(problem, without)
-            base_cov = problem.weight[counts_wo >= problem.k].sum()
+            base_cov = problem.value[counts_wo >= problem.k].sum()
             # cells that exactly one more AP would complete
-            one_short = (counts_wo == problem.k - 1) * problem.weight
+            one_short = (counts_wo == problem.k - 1) * problem.value
             new_cov = base_cov + problem.hit_f @ one_short.astype(np.float32)
             new_cov[~problem.allowed] = -1
             new_cov[without] = -1
             new_cov[_blocked(problem, without)] = -1
             real = new_cov
             best = int(np.argmax(np.where(real > 0, _favour(problem, real), real)))
-            current = problem.weight[_counts(problem, selected) >= problem.k].sum()
+            current = problem.value[_counts(problem, selected) >= problem.k].sum()
             snaps_back = (
                 problem.prefer is not None and problem.prefer[best]
                 and not problem.prefer[selected[pos]] and real[best] >= current - 1e-9
@@ -211,6 +244,25 @@ def _marginal_steps(problem: Problem, selected: list[int]) -> list[dict]:
         })
         previous = coverage
     return steps
+
+
+def deficit_priority(current_dbm: np.ndarray, threshold_dbm: np.ndarray, span_db: float = 10.0,
+                     cap_db: float = 30.0) -> np.ndarray:
+    """Priority of each cell from how far its current signal is below the threshold: 1 at the threshold, +1 per
+    `span_db` below it (a red -95 dBm cell against -75 dBm counts 3x a cell just short of it), capped."""
+    deficit = np.clip(np.asarray(threshold_dbm, float) - np.asarray(current_dbm, float), 0.0, cap_db)
+    return 1.0 + deficit / span_db
+
+
+def range_separation(hit: np.ndarray, cell_area_m2: float, floor_m: float, share: float = 0.5) -> float:
+    """Minimum distance between chosen APs from what one AP covers: `share` x the radius of the median candidate's
+    coverage area (an AP that reaches 30 m keeps the next one ~15 m away, so they cannot pile up in one spot), never
+    below the user's `floor_m`."""
+    if hit.size == 0:
+        return floor_m
+    areas = hit.sum(axis=1) * cell_area_m2
+    radius = float(np.sqrt(np.median(areas) / np.pi)) if len(areas) else 0.0
+    return max(floor_m, share * radius)
 
 
 def breakdown(problem: Problem, counts: np.ndarray, groups: np.ndarray, n_groups: int) -> list[dict]:

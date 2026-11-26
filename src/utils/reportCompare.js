@@ -46,7 +46,12 @@ export async function buildBandComparisonReport({
   snrTargetDb = DEFAULT_SNR_TARGET_DB,
   includeAppendices = false, // Appendix A / B and the coverage-build chart: off keeps the report to the standard layout
   onProgress = () => {},
+  // the optimiser's designs: { "2.4": plan with the 2.4 GHz proposed APs, "5": plan with the 5 GHz ones }. Without
+  // it (the usual case) both bands use `plan`: the same APs on each band, exactly as before.
+  planByBand = null,
+  designLabel = null, // e.g. "Optimised designs (not applied to the plan)"
 }) {
+  const planOf = (band) => planByBand?.[band] || plan;
   const doc = new DocxBuilder();
   const title = projectName || "Indoor plan";
   const now = new Date();
@@ -71,7 +76,7 @@ export async function buildBandComparisonReport({
       cells: rankedCells(f.raw, areasOf(f.floorId), skipOf(f.floorId)),
     }));
     const cells = floors.flatMap((f) => f.cells);
-    const aps = plan.sources.filter((s) => s.kind === "wifi").map((s) => ({ source: s, radio: radioFor(plan, s, band) }));
+    const aps = planOf(band).sources.filter((s) => s.kind === "wifi").map((s) => ({ source: s, radio: radioFor(planOf(band), s, band) }));
     const covers = coverageAt(cells, thresholds);
     data[band] = {
       band,
@@ -131,8 +136,8 @@ export async function buildBandComparisonReport({
     if (out) doc.image(out.bytes, out.width, out.height, alt, maxWidthPx);
     else doc.paragraph("(no drawing available for this floor)", { italic: true });
   };
-  const apMarkers = (floorId) =>
-    plan.sources.filter((s) => s.kind === "wifi" && s.floorId === floorId).map((s) => ({ name: shortName(s.name), x: s.x, z: s.z, color: "#111827" }));
+  const apMarkers = (floorId, band = null) =>
+    (band ? planOf(band) : plan).sources.filter((s) => s.kind === "wifi" && s.floorId === floorId).map((s) => ({ name: shortName(s.name), x: s.x, z: s.z, color: "#111827" }));
 
   doc.setHeaderFooter({ header: `${title} · 2.4 GHz vs 5 GHz Wi-Fi Comparison Report`, footer: "", logos });
 
@@ -141,14 +146,20 @@ export async function buildBandComparisonReport({
   doc.paragraph("", {});
   doc.title("2.4 GHz vs 5 GHz Wi-Fi Comparison Prediction Report");
   doc.paragraph(title, { bold: true, size: 20, color: "2F6F62" });
-  doc.paragraph("The same access points, positions and building predicted on each band with ray-traced radio propagation (Sionna RT).", { size: 12, color: "526B62" });
+  doc.paragraph(
+    planByBand
+      ? "The optimiser's proposed design for each band, predicted with ray-traced radio propagation (Sionna RT). Each band was planned on its own, so the two designs have their own APs and positions: this compares the 2.4 GHz design with the 5 GHz design, not the same APs on two bands."
+      : "The same access points, positions and building predicted on each band with ray-traced radio propagation (Sionna RT).",
+    { size: 12, color: "526B62" },
+  );
   doc.paragraph("");
   doc.table(
     [
       ["Item", "Value"],
       ["Project", title],
       ["Floors", plan.floors.map((f) => f.name).join(", ")],
-      ["Wi-Fi access points", String(lo.aps.length)],
+      ["Wi-Fi access points", planByBand ? `${lo.aps.length} (${name(lo.band)} design) / ${hi.aps.length} (${name(hi.band)} design)` : String(lo.aps.length)],
+      ...(designLabel ? [["Design", designLabel]] : []),
       ["Bands compared", COMPARED_BANDS.map(name).join(" and ")],
       ["Design threshold", `${designThr} dBm`],
       ["Report generated", now.toLocaleString()],
@@ -339,7 +350,7 @@ export async function buildBandComparisonReport({
           floorId: fl.floorId,
           cells: heatCells(fl.cells),
           ranges,
-          aps: apMarkers(fl.floorId),
+          aps: apMarkers(fl.floorId, d.band),
           title: `${name(d.band)} · ${floorName(fl.floorId)} · strongest-AP RSSI (dBm) · design threshold ${designThr} dBm`,
         },
         `${d.band} GHz coverage on ${floorName(fl.floorId)}`,
@@ -387,6 +398,39 @@ export async function buildBandComparisonReport({
     doc.pageBreak();
   }
   doc.pageBreak();
+
+  // ---- 3D views (one page per floor): the building, and the building with the predicted signal ------------
+  // Drawn off-screen with their own camera framed on the floor (src/utils/report3d.js), never a screenshot.
+  {
+    const { render3dImage } = await import("./report3d.js");
+    const put3d = (out, alt) => {
+      if (out) doc.image(out.bytes, out.width, out.height, alt);
+      else doc.paragraph("(the 3D view needs WebGL, which this computer's browser does not offer)", { italic: true });
+    };
+    for (const f of plan.floors) {
+      if (!areasOf(f.id).length) continue;
+      onProgress(`3D view of ${f.name}`);
+      doc.pageBreak();
+      doc.heading(`${f.name}: 3D view`, 2);
+      const aps3d = plan.sources
+        .filter((s) => s.kind === "wifi" && s.floorId === f.id)
+        .map((s) => ({ name: shortName(s.name), x: s.x, z: s.z, heightM: s.heightM, color: s.origin === "optimized" ? "#dc2626" : "#7c3aed" }));
+      put3d(await render3dImage({ plan, floorId: f.id, aps: aps3d, title: `${f.name} · 3D view: rooms, walls and access points` }), `3D view of ${f.name}`);
+      for (const d of [lo, hi]) {
+        const fl = d.floors.find((x) => x.floorId === f.id);
+        if (!fl) continue;
+        doc.pageBreak();
+        doc.heading(`${f.name}: 3D view with the predicted ${name(d.band)} signal`, 2);
+        put3d(await render3dImage({
+          plan, floorId: f.id, cells: heatCells(fl.cells), ranges,
+          aps: planOf(d.band).sources
+            .filter((s) => s.kind === "wifi" && s.floorId === f.id)
+            .map((s) => ({ name: shortName(s.name), x: s.x, z: s.z, heightM: s.heightM, color: s.origin === "optimized" ? "#dc2626" : "#7c3aed" })),
+          title: `${f.name} · 3D view with the predicted signal · ${name(d.band)} · strongest-AP RSSI (dBm)`,
+        }), `3D view with ${d.band} GHz prediction of ${f.name}`);
+      }
+    }
+  }
 
   // ==== SNR comparison ====================================================================
   onProgress("SNR");
@@ -438,7 +482,7 @@ export async function buildBandComparisonReport({
             cells: fl.cells.map((c) => ({ x: c.x, z: c.z, step: c.step, dbm: Number.isFinite(c.snr) ? c.snr : -20 })),
             ranges: snrRanges,
             legendTitle: "SNR (dB):",
-            aps: apMarkers(fl.floorId),
+            aps: apMarkers(fl.floorId, d.band),
             title: `${name(d.band)} · ${floorName(fl.floorId)} · SNR (dB)`,
           },
           `${d.band} GHz SNR on ${floorName(fl.floorId)}`,
@@ -476,7 +520,7 @@ export async function buildBandComparisonReport({
           cells: f.cells.map((c) => ({ x: c.x, z: c.z, step: c.step, fill: c.best >= designThr ? AP_COLORS[c.top[0].i % AP_COLORS.length] : "#9ca3af" })),
           legend: [...d.apNames.map((n, i) => ({ color: AP_COLORS[i % AP_COLORS.length], label: n })), { color: "#9ca3af", label: `below ${designThr} dBm` }],
           legendTitle: "Primary AP:",
-          aps: apMarkers(f.floorId),
+          aps: apMarkers(f.floorId, d.band),
           title: `${name(d.band)} · ${floorName(f.floorId)} · primary (strongest) AP`,
         },
         `Primary AP map ${name(d.band)} ${floorName(f.floorId)}`,

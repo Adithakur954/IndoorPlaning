@@ -9,11 +9,12 @@ import {
   uploadScene,
   waitForSimulation,
 } from "../services/simulation.js";
-import { getModelVersion } from "../services/maintenance.js";
+import { deleteJob, getModelVersion } from "../services/maintenance.js";
 import {
   isMissingResult,
   planStamp,
   replaceSavedResult,
+  savedJobIds,
 } from "../utils/savedResults.js";
 
 // Noise floor (dBm) of a 20 MHz channel, per band, for the SNR map. These are
@@ -208,8 +209,21 @@ export function useRayTracedPrediction({
   };
 
   // Hides the heatmap so only the building is shown. The run stays loaded and
-  // saved: "Show prediction" brings it back without simulating again.
+  // saved: "Show heatmap" brings it back without simulating again.
   const clearPrediction = () => setHeatmap(false);
+  // Really clears it: the project forgets the prediction and the service deletes its files. Nothing comes back
+  // until the prediction is run again.
+  const deletePrediction = () => {
+    const old = latestPlan.current.savedResults?.prediction;
+    mutate((p) => {
+      const { prediction: _gone, ...rest } = p.savedResults || {}; // eslint-disable-line no-unused-vars
+      return { ...p, savedResults: rest };
+    });
+    for (const id of savedJobIds(old)) deleteJob(id).catch(() => {});
+    setRt({ maps: {}, active: false });
+    setHeatmap(false);
+    setRun(null);
+  };
   const showPrediction = () => {
     showOnMap?.();
     setHeatmap(true);
@@ -221,6 +235,7 @@ export function useRayTracedPrediction({
     mutate((p) => ({
       ...p,
       sources: p.sources.filter((s) => s.origin !== "optimized"),
+      optimizationApplied: undefined,
     }));
 
   // One model: after the plan changes (an AP moved, a wall edited, ...) the
@@ -229,6 +244,9 @@ export function useRayTracedPrediction({
   // stopped simulation service cannot cause a retry loop.
   const autoTried = useRef(null);
   const hasWifi = plan.sources.some((s) => s.kind === "wifi");
+  // With no access point left, the old prediction describes APs that are gone: the map leaves its cells out
+  // (only the prediction's; the optimiser's map is not affected). It is not deleted: the next run replaces it.
+  const noApsLeft = Boolean(rt.result) && !hasWifi;
   useEffect(() => {
     if (!rt.jobId || !stale || busy || !hasWifi) return undefined;
     if (autoTried.current === stamp) return undefined;
@@ -251,7 +269,9 @@ export function useRayTracedPrediction({
     restoreNote,
     runPrediction,
     clearPrediction,
+    deletePrediction,
     showPrediction,
+    noApsLeft,
     heatmapOn: Boolean(heatmap),
     removeOptimizedAps,
   };

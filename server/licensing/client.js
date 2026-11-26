@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import {
+  grantFeatures,
   publicKeyFromRaw,
   machineMatches,
   validateGrant,
@@ -23,6 +24,7 @@ export function licenseState(grant, activatedAt, currentTime) {
     activatedAt,
     expiresAt,
     durationDays: grant.durationDays,
+    features: grantFeatures(grant),
     remainingSeconds: Math.max(0, Math.ceil((expiresAt - currentTime) / 1000)),
   };
 }

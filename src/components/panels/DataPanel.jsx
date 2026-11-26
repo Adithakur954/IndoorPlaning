@@ -59,6 +59,7 @@ export default function DataPanel({
         setMessage={setMessage}
         setTab={setTab}
         hideImage={() => setHiddenLayers?.((l) => (l.includes("image") ? l : [...l, "image"]))}
+        showImage={() => setHiddenLayers?.((l) => l.filter((x) => x !== "image"))}
       />
       <section className="panel">
         <h2>Building plans</h2>

@@ -1,5 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { bbox, boundaryAreas, pointsOf } from "../../utils/geometry.js";
+import {
+  bbox,
+  boundaryAreas,
+  edgeMeasures,
+  formatMetres,
+  pointsOf,
+} from "../../utils/geometry.js";
 import { buildWalls } from "../../utils/wallGraph.js";
 import { materialColors } from "../../config/materialColors.js";
 import PlanCompass from "./PlanCompass.jsx";
@@ -26,11 +32,14 @@ export default function Plan2D({
   showRoomNames = true,
   showFurnitureNames = true,
   showWifiNames = true,
+  showMeasurements = false,
+  cables = null,
+  racks = null,
   selected,
   onSelect,
   onPlace,
   onMove,
-  onMovePolygonPart,
+  onMoveShapePart,
   predictions,
   overlay,
   heatmap,
@@ -124,6 +133,20 @@ export default function Plan2D({
     height = spanZ + 2 * margin,
     viewWidth = width / zoom,
     viewHeight = height / zoom;
+  // AP markers and their names keep a readable size on screen (at least 14 px dot, 12 px text) on any size of
+  // building: a fixed size in metres becomes a speck on a 190 m factory
+  const [svgPx, setSvgPx] = useState({ w: 900, h: 600 });
+  useEffect(() => {
+    const el = svg.current;
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(() => setSvgPx({ w: el.clientWidth || 900, h: el.clientHeight || 600 }));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const mPerPx = Math.max(viewWidth / Math.max(svgPx.w, 1), viewHeight / Math.max(svgPx.h, 1));
+  const apR = Math.max(0.38, 7 * mPerPx);
+  const apFont = Math.max(AP_FONT, 12 * mPerPx);
+  const apStroke = Math.max(0.12, 2 * mPerPx);
   const point = (e, shouldSnap = snap) => {
     const p = svg.current.createSVGPoint();
     p.x = e.clientX;
@@ -153,17 +176,24 @@ export default function Plan2D({
     };
     e.currentTarget.setPointerCapture(e.pointerId);
   };
-  const startPolygonPartDrag = (e, roomId, index, mode) => {
-    e.stopPropagation();
+  // grab a vertex, or an edge (vertex index -> index + 1), of a room, a
+  // boundary or a wall; Shift on an edge drags the whole shape instead
+  const startPartDrag = (e, type, id, index, mode, anchor) => {
     if (tool !== "select") return;
-    onSelect({ type: "room", id: roomId });
-    const at = point(e, false);
+    if (mode === "edge" && e.shiftKey) {
+      down(e, type, id);
+      return;
+    }
+    e.stopPropagation();
+    onSelect(entity(type, id));
     drag.current = {
-      type: "polygon-part",
-      id: roomId,
+      type: "shape-part",
+      partType: type,
+      id,
       index,
       mode,
-      origin: at,
+      anchor,
+      origin: point(e, false),
       applied: { x: 0, z: 0 },
       pointer: { x: e.clientX, y: e.clientY },
     };
@@ -189,13 +219,16 @@ export default function Plan2D({
     const p = point(e, false),
       rawX = p.x - d.origin.x,
       rawZ = p.z - d.origin.z,
-      targetX = snap ? Math.round(rawX * 2) / 2 : rawX,
-      targetZ = snap ? Math.round(rawZ * 2) / 2 : rawZ,
+      // a dragged vertex / edge lands on the grid itself, not by grid steps
+      ax = d.anchor?.x ?? 0,
+      az = d.anchor?.z ?? 0,
+      targetX = snap ? Math.round((ax + rawX) * 2) / 2 - ax : rawX,
+      targetZ = snap ? Math.round((az + rawZ) * 2) / 2 - az : rawZ,
       dx = targetX - d.applied.x,
       dz = targetZ - d.applied.z;
     if (dx || dz) {
-      if (d.type === "polygon-part")
-        onMovePolygonPart(d.id, d.index, dx, dz, d.mode);
+      if (d.type === "shape-part")
+        onMoveShapePart(d.partType, d.id, d.index, dx, dz, d.mode);
       else onMove(d.type, d.id, dx, dz);
       d.applied = { x: targetX, z: targetZ };
     }
@@ -245,18 +278,130 @@ export default function Plan2D({
       onPlace(tool === "boundary" ? "boundary" : "polygon", { points: poly });
     setPoly([]);
   };
-  const heatAreas = [...rooms, ...boundaryAreas(plan, floorId)];
+  // memoised: a new array here would rebuild the whole heatmap image on every
+  // pan/zoom frame
+  const heatAreas = useMemo(
+    () => [
+      ...plan.rooms.filter((r) => r.floorId === floorId),
+      ...boundaryAreas(plan, floorId),
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [plan.rooms, plan.boundaries, floorId],
+  );
   // drawing width follows the wall thickness (0.2 m looks like before)
   const wallT = Number(plan.wallThickness) || 0.2;
+  const wallCore = Math.min(0.4, Math.max(0.05, wallT * 0.6));
+  // walls are drawn at their real width, but never thinner than a few pixels on screen: on a 190 m site a
+  // 0.2 m wall would otherwise be a hairline (display only; the plan keeps the real thickness)
+  const onScreen = (metres, minPx) => Math.max(metres, minPx * mPerPx);
   // the same merged walls as the 3D view and the ray-tracing export, coloured
   // by material like the legend
   const wallModel = useMemo(
     () => buildWalls(plan, floorId),
     [plan.rooms, plan.boundaries, plan.doors, plan.windows, plan.wallTypes, floorId],
   );
+  // ---- vertex / edge editing ----------------------------------------------
+  // handle sizes follow the zoom so they stay grabbable
+  const handleR = Math.min(0.35, Math.max(0.08, viewWidth * 0.007));
+  const edgeHitW = handleR * 2.6;
+  const editable = tool === "select";
+  const editShapes = [
+    ...(shown("boundary") ? plan.boundaries || [] : [])
+      .filter((b) => b.floorId === floorId && b.points?.length >= 3)
+      .map((b) => ({ type: "boundary", id: b.id, points: b.points, closed: true })),
+    ...(shown("rooms") ? rooms : [])
+      .filter((r) => r.shape === "polygon" || r.shape === "rectangle" || !r.shape)
+      .map((r) => ({ type: "room", id: r.id, points: pointsOf(r), closed: true })),
+    ...(shown("walls") ? walls : []).map((w) => ({
+      type: "wall",
+      id: w.id,
+      points: [
+        { x: +w.x1, z: +w.z1 },
+        { x: +w.x2, z: +w.z2 },
+      ],
+      closed: false,
+    })),
+  ];
+  const isSel = (s) => selected?.type === s.type && selected.id === s.id;
+  const edgesOf = (s) =>
+    s.points
+      .slice(0, s.closed ? s.points.length : s.points.length - 1)
+      .map((a, i) => ({ a, b: s.points[(i + 1) % s.points.length], i }));
+  const edgeHits = (s) =>
+    edgesOf(s).map(({ a, b, i }) => (
+      <line
+        key={`${s.type}-${s.id}-e${i}`}
+        className={isSel(s) ? "shape-edge-hit selected" : "shape-edge-hit"}
+        x1={a.x}
+        y1={a.z}
+        x2={b.x}
+        y2={b.z}
+        stroke="transparent"
+        strokeWidth={edgeHitW}
+        strokeLinecap="round"
+        pointerEvents="stroke"
+        onPointerDown={(e) => startPartDrag(e, s.type, s.id, i, "edge", a)}
+      >
+        <title>Drag to move this edge · Shift+drag moves the whole shape</title>
+      </line>
+    ));
+  const selectedShape = editShapes.find(isSel);
+  // ---- edge lengths ---------------------------------------------------------
+  const measureFont = Math.min(0.5, Math.max(0.16, viewWidth * 0.011));
+  const measureLabels = !showMeasurements
+    ? []
+    : [
+        ...(shown("rooms") ? rooms : []).flatMap((r) =>
+          r.shape === "circle"
+            ? [
+                {
+                  key: `m-${r.id}-d`,
+                  x: +r.x + +r.width / 2,
+                  z: +r.z + +r.depth / 2 + measureFont * 1.4,
+                  angle: 0,
+                  text: `Ø ${formatMetres(2 * Number(r.radius || r.width / 2))}`,
+                },
+              ]
+            : edgeMeasures(pointsOf(r)).map((m) => ({
+                key: `m-${r.id}-${m.index}`,
+                x: m.mid.x + m.inward.x * (wallCore / 2 + measureFont * 0.8),
+                z: m.mid.z + m.inward.z * (wallCore / 2 + measureFont * 0.8),
+                angle: m.angleDeg,
+                text: formatMetres(m.length),
+              })),
+        ),
+        ...(shown("boundary") ? plan.boundaries || [] : [])
+          .filter((b) => b.floorId === floorId && b.points?.length >= 3)
+          .flatMap((b) =>
+            // outside the building, so they never sit on the room labels
+            edgeMeasures(b.points).map((m) => ({
+              key: `m-${b.id}-${m.index}`,
+              x: m.mid.x - m.inward.x * (wallCore + measureFont * 0.9),
+              z: m.mid.z - m.inward.z * (wallCore + measureFont * 0.9),
+              angle: m.angleDeg,
+              text: formatMetres(m.length),
+              boundary: true,
+            })),
+          ),
+        ...(shown("walls") ? walls : []).flatMap((w) =>
+          edgeMeasures(
+            [
+              { x: w.x1, z: w.z1 },
+              { x: w.x2, z: w.z2 },
+            ],
+            false,
+          ).map((m) => ({
+            key: `m-${w.id}`,
+            x: m.mid.x + m.inward.x * (0.12 + measureFont * 0.7),
+            z: m.mid.z + m.inward.z * (0.12 + measureFont * 0.7),
+            angle: m.angleDeg,
+            text: formatMetres(m.length),
+          })),
+        ),
+      ];
   // names never sit on each other or on a column / AP marker
   const labelSpots = useMemo(() => {
-    const AP_R = 0.38 + 0.06;
+    const AP_R = apR + apStroke / 2;
     const items = [],
       obstacles = [];
     const visibleFurniture = shown("furniture") ? furniture : [];
@@ -291,15 +436,14 @@ export default function Plan2D({
         items.push({
           id: `s:${s.id}`,
           text: shortApName(s.name),
-          fontSize: AP_FONT,
+          fontSize: apFont,
           priority: 2,
           preferred: null,
           anchor: rect,
         });
     }
     return layoutLabels(items, obstacles);
-  }, [furniture, sources, hiddenLayers, showFurnitureNames, showWifiNames]);
-  const wallCore = Math.min(0.4, Math.max(0.05, wallT * 0.6));
+  }, [furniture, sources, hiddenLayers, showFurnitureNames, showWifiNames, apR, apFont, apStroke]);
   const ranges = getMetricRanges(plan, metric);
   const color = (value) => getMetricColor(value, ranges);
   const cells = logGrid
@@ -471,38 +615,6 @@ export default function Plan2D({
               strokeWidth={r.needsReview ? 0.12 : undefined}
               strokeDasharray={r.needsReview ? ".5 .3" : undefined}
             />
-            {selected?.type === "room" &&
-              selected.id === r.id &&
-              r.shape === "polygon" &&
-              pointsOf(r).map((vertex, index) => {
-                const next = pointsOf(r)[(index + 1) % pointsOf(r).length];
-                return (
-                  <g key={`polygon-edit-${index}`}>
-                    <line
-                      className="polygon-edge-hit"
-                      x1={vertex.x}
-                      y1={vertex.z}
-                      x2={next.x}
-                      y2={next.z}
-                      stroke="transparent"
-                      strokeWidth=".45"
-                      pointerEvents="stroke"
-                      onPointerDown={(e) =>
-                        startPolygonPartDrag(e, r.id, index, "edge")
-                      }
-                    />
-                    <circle
-                      className="polygon-vertex-handle"
-                      cx={vertex.x}
-                      cy={vertex.z}
-                      r=".2"
-                      onPointerDown={(e) =>
-                        startPolygonPartDrag(e, r.id, index, "vertex")
-                      }
-                    />
-                  </g>
-                );
-              })}
             {showRoomNames && (
               <text
                 x={+r.x + +r.width / 2}
@@ -534,7 +646,7 @@ export default function Plan2D({
               x2={w.b.x}
               y2={w.b.z}
               stroke={w.owners.some((o) => o.type === "boundary") ? "#1f3f3a" : "#435b60"}
-              strokeWidth={wallCore * (w.owners.some((o) => o.type === "boundary") ? 1.9 : 1.35)}
+              strokeWidth={onScreen(wallCore * (w.owners.some((o) => o.type === "boundary") ? 1.9 : 1.35), w.owners.some((o) => o.type === "boundary") ? 5 : 4)}
               strokeLinecap="square"
             />
             <line
@@ -543,13 +655,21 @@ export default function Plan2D({
               x2={w.b.x}
               y2={w.b.z}
               stroke={materialColors[w.material] || materialColors.drywall}
-              strokeWidth={wallCore}
+              strokeWidth={onScreen(wallCore, w.owners.some((o) => o.type === "boundary") ? 3 : 2.4)}
               strokeLinecap="square"
             />
           </g>
         ))}
+        {editable && (
+          <g className="shape-edit-edges">
+            {editShapes
+              .filter((s) => s.type !== "wall" && !isSel(s))
+              .flatMap(edgeHits)}
+            {selectedShape && selectedShape.type !== "wall" && edgeHits(selectedShape)}
+          </g>
+        )}
         {(shown("walls") ? walls : []).map((w) => (
-          <g key={w.id} onPointerDown={(e) => down(e, "wall", w.id)}>
+          <g key={w.id} className="draggable" onPointerDown={(e) => down(e, "wall", w.id)}>
             <line
               x1={w.x1}
               y1={w.z1}
@@ -560,7 +680,7 @@ export default function Plan2D({
                   ? "#f59e0b"
                   : "#435b60"
               }
-              strokeWidth=".21"
+              strokeWidth={onScreen(0.21, 4)}
             />
             <line
               x1={w.x1}
@@ -568,7 +688,7 @@ export default function Plan2D({
               x2={w.x2}
               y2={w.z2}
               stroke={materialColors[w.material] || materialColors.drywall}
-              strokeWidth=".15"
+              strokeWidth={onScreen(0.15, 2.4)}
             />
           </g>
         ))}
@@ -688,16 +808,17 @@ export default function Plan2D({
             <circle
               cx={s.x}
               cy={s.z}
-              r=".38"
+              r={apR}
               fill={s.kind === "wifi" ? "#7c3aed" : "#0e7490"}
               stroke="white"
-              strokeWidth=".12"
+              strokeWidth={apStroke}
             />
             {(s.kind !== "wifi" || showWifiNames) && (
               <text
                 x={labelSpots[`s:${s.id}`]?.x ?? s.x}
-                y={labelSpots[`s:${s.id}`]?.y ?? +s.z - 0.55}
-                fontSize={AP_FONT}
+                y={labelSpots[`s:${s.id}`]?.y ?? +s.z - apR - apFont * 0.7}
+                fontSize={apFont}
+                fontWeight={600}
                 textAnchor="middle"
                 dominantBaseline="middle"
                 fill="#213547"
@@ -723,9 +844,7 @@ export default function Plan2D({
               }
               strokeWidth={Math.min(0.8, Math.max(0.06, wallT * 2))}
               strokeLinejoin="round"
-              pointerEvents={tool === "select" ? "stroke" : "none"}
-              style={{ cursor: "pointer" }}
-              onPointerDown={(e) => down(e, "boundary", b.id)}
+              pointerEvents="none"
             />
           ))}
         {overlay?.focus?.a && (
@@ -779,20 +898,83 @@ export default function Plan2D({
           </circle>
         ))}
         {overlay?.candidates?.rejected.map((c, i) => (
-          <g key={`${c.id}-${i}`} stroke="#dc2626" strokeWidth=".07" opacity=".8">
-            <line x1={c.x - 0.12} y1={c.z - 0.12} x2={c.x + 0.12} y2={c.z + 0.12} />
-            <line x1={c.x - 0.12} y1={c.z + 0.12} x2={c.x + 0.12} y2={c.z - 0.12} />
+          <g key={`${c.id}-${i}`} stroke="#dc2626" strokeWidth={onScreen(0.07, 1.5)} opacity=".8">
+            <line x1={c.x - onScreen(0.12, 3)} y1={c.z - onScreen(0.12, 3)} x2={c.x + onScreen(0.12, 3)} y2={c.z + onScreen(0.12, 3)} />
+            <line x1={c.x - onScreen(0.12, 3)} y1={c.z + onScreen(0.12, 3)} x2={c.x + onScreen(0.12, 3)} y2={c.z - onScreen(0.12, 3)} />
             <title>{`Rejected: ${c.reasonText}`}</title>
           </g>
         ))}
+        {/* suggested APs: the same readable size as placed APs at any zoom, orange, numbered and labelled */}
         {overlay?.recommended?.map((r) => (
           <g key={r.candidateId} pointerEvents="none">
-            <circle cx={r.planX} cy={r.planZ} r=".42" fill="#fff" stroke="#e8790a" strokeWidth=".14" />
-            <text x={r.planX} y={r.planZ + 0.17} textAnchor="middle" fontSize=".5" fontWeight="700" fill="#b45309">
+            <circle cx={r.planX} cy={r.planZ} r={apR * 1.25} fill="#fff7ed" stroke="#e8790a" strokeWidth={apStroke * 1.6} />
+            <text x={r.planX} y={r.planZ} textAnchor="middle" dominantBaseline="central" fontSize={apFont * 0.95}
+              fontWeight="700" fill="#b45309">
               {r.rank}
+            </text>
+            <text x={r.planX} y={+r.planZ - apR * 1.25 - apFont * 0.6} textAnchor="middle" fontSize={apFont}
+              fontWeight="700" fill="#b45309" stroke="#fff" strokeWidth={apFont * 0.25} paintOrder="stroke">
+              {r.action === "move" ? `Move AP here (${r.rank})` : r.action === "keep" ? `Keep AP (${r.rank})` : `New AP ${r.rank}`}
             </text>
           </g>
         ))}
+        {cables && (
+          <g pointerEvents="none">
+            {cables.runs.flatMap((run) =>
+              run.paths
+                .filter((p) => p.floorId === floorId)
+                .map((p, i) => (
+                  <polyline key={`cable-${run.apId}-${i}`} fill="none" strokeLinejoin="round"
+                    points={p.points.map((q) => `${q.x},${q.z}`).join(" ")}
+                    stroke={run.check === "ok" ? "#1f8a4c" : run.check === "near limit" ? "#d98200" : "#c0392b"}
+                    strokeWidth=".09" strokeDasharray={run.pathwayStatus === "estimated" ? ".35 .18" : undefined} opacity=".9" />
+                )),
+            )}
+            {(racks || []).filter((r) => r.floorId === floorId).map((r) => (
+              <g key={`rack-${r.id}`}>
+                <rect x={r.x - 0.35} y={r.z - 0.35} width=".7" height=".7" fill="#fff" stroke="#1d4ed8" strokeWidth=".1" />
+                <text x={r.x} y={r.z + 0.14} textAnchor="middle" fontSize=".4" fontWeight="700" fill="#1d4ed8">R</text>
+              </g>
+            ))}
+          </g>
+        )}
+        {measureLabels.length > 0 && (
+          <g className="plan-measurements" pointerEvents="none">
+            {measureLabels.map((l) => (
+              <text
+                key={l.key}
+                x={l.x}
+                y={l.z}
+                transform={`rotate(${l.angle} ${l.x} ${l.z})`}
+                fontSize={measureFont}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                className={l.boundary ? "plan-label measure boundary" : "plan-label measure"}
+              >
+                {l.text}
+              </text>
+            ))}
+          </g>
+        )}
+        {editable && selectedShape && (
+          <g className="shape-edit-vertices">
+            {selectedShape.points.map((v, i) => (
+              <circle
+                key={`v${i}`}
+                className="polygon-vertex-handle"
+                cx={v.x}
+                cy={v.z}
+                r={handleR}
+                strokeWidth={handleR * 0.45}
+                onPointerDown={(e) =>
+                  startPartDrag(e, selectedShape.type, selectedShape.id, i, "vertex", v)
+                }
+              >
+                <title>{`Drag vertex ${i + 1}`}</title>
+              </circle>
+            ))}
+          </g>
+        )}
         {poly.length > 0 && (
           <polyline
             points={poly.map((p) => `${p.x},${p.z}`).join(" ")}

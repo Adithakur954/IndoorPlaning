@@ -167,3 +167,31 @@ test("a very short wall (closer than the corner clearance) is rejected as a corn
   const { stats } = generateCandidates(p, "f1");
   assert.ok(stats.byReason.corner > 0);
 });
+
+test("mounting heights follow the user's settings", () => {
+  const wall = generateCandidates(plan(), "f1", { mounting: ["wall"], wallHeightM: 2.2 });
+  assert.ok(wall.valid.length > 0);
+  assert.ok(wall.valid.every((c) => c.heightM === 2.2));
+  const ceiling = generateCandidates(plan(), "f1", { mounting: ["ceiling"], ceilingDropM: 0.4 });
+  assert.ok(ceiling.valid.length > 0);
+  assert.ok(ceiling.valid.every((c) => Math.abs(c.heightM - 2.6) < 1e-9));
+});
+
+test("no position in a small room standing apart from the building (an import's mark on the road)", async () => {
+  const { generateCandidates, buildingScope } = await import("../src/utils/apCandidates.js");
+  const plan = {
+    floors: [{ id: "f", elevation: 0 }],
+    rooms: [
+      { id: "hall", floorId: "f", name: "Hall", shape: "rectangle", x: 10, z: 0, width: 40, depth: 20, height: 3 },
+      { id: "office", floorId: "f", name: "Office", shape: "rectangle", x: 20, z: 5, width: 6, depth: 5, height: 3 },
+      { id: "road", floorId: "f", name: "Room 10", shape: "rectangle", x: 0, z: 8, width: 3, depth: 2, height: 3 },
+    ],
+    boundaries: [], doors: [], windows: [], furniture: [], interiorWalls: [], wallTypes: {},
+  };
+  const scope = buildingScope(plan, "f");
+  assert.deepEqual([...scope.outsideRoomIds], ["road"]);
+  const { valid, rejected } = generateCandidates(plan, "f", { mounting: ["wall", "ceiling"] });
+  assert.equal(valid.filter((c) => c.roomId === "road").length, 0);
+  assert.ok(rejected.some((c) => c.reason === "outside" && c.roomId === "road"));
+  assert.ok(valid.some((c) => c.roomId === "office"));
+});

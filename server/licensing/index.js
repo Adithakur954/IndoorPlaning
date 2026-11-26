@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { dataDir } from "../config/paths.js";
 import { machineIdHash } from "./machine.js";
 import { createLicenseClient } from "./client.js";
+import { FEATURES, featureAllowed } from "../../licensing/protocol.js";
 
 let client;
 let identity;
@@ -26,6 +27,7 @@ async function status() {
   if (development())
     return {
       status: "development",
+      features: FEATURES,
       message: "License checks are disabled for development",
     };
   let configured;
@@ -86,6 +88,23 @@ export async function requireLicense(_req, res, next) {
     code: "LICENSE_REQUIRED",
     license,
   });
+}
+// Guards a module that is sold separately, for example the cellular IBS/DAS
+// add-on. Wi-Fi routes never use it, so they are not affected.
+export function requireFeature(name) {
+  return async (_req, res, next) => {
+    const license = await status();
+    if (
+      ["active", "development"].includes(license.status) &&
+      featureAllowed(license, name)
+    )
+      return next();
+    res.status(403).json({
+      error: `The ${name} module is not included in your license.`,
+      code: "FEATURE_NOT_LICENSED",
+      feature: name,
+    });
+  };
 }
 export function closeLicensing() {
   client?.close();

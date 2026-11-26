@@ -150,6 +150,56 @@ class FloorplanTest(unittest.TestCase):
         self.assertTrue(no_scale["scale"]["needsInput"])
         self.assertIsNone(no_scale["rooms"][0]["areaM2"])
 
+    def test_plan_drawn_in_thin_lines(self):
+        """Presentation plans draw every wall as a thin line. The thick-stroke reading drops
+        such lines on purpose, so the thin-line reading must find the rooms, and the choice
+        between the two must fall on it. Stair treads and desks must not become walls."""
+        import numpy as np
+
+        ppm = 20
+        img = np.full((560, 860, 3), 255, np.uint8)
+        grey = (90, 90, 90)
+        # a 40 x 24 m building, 3 x 2 rooms: a thick outer wall, every partition a 2 px line
+        # (with 1 m door gaps), as in a presentation plan
+        x0, y0, x1, y1 = 30, 30, 830, 510
+        cv2.rectangle(img, (x0, y0), (x1, y1), grey, 6)
+        for x in (297, 563):
+            cv2.line(img, (x, y0), (x, 250), grey, 2)
+            cv2.line(img, (x, 270), (x, y1), grey, 2)
+        cv2.line(img, (x0, 270), (400, 270), grey, 2)
+        cv2.line(img, (420, 270), (x1, 270), grey, 2)
+        for k in range(10):                                   # a stair: close parallel treads
+            cv2.line(img, (60, 300 + 6 * k), (140, 300 + 6 * k), grey, 1)
+        for k in range(6):                                    # desks: small boxes
+            cv2.rectangle(img, (620 + 30 * k, 80), (645 + 30 * k, 95), grey, 1)
+        tmp = Path(tempfile.mkdtemp())
+        cv2.imwrite(str(tmp / "thin.png"), img)
+        base = {"ocr": False, "engine": "classical"}
+        thick = reconstruct(tmp / "thin.png", tmp / "a", scale={"pxPerM": ppm}, options=base)
+        thin = reconstruct(tmp / "thin.png", tmp / "b", scale={"pxPerM": ppm}, options={**base, "thin_lines": True})
+        self.assertGreaterEqual(len(thin["rooms"]), 6, "the six rooms close")
+        self.assertGreater(len(thin["rooms"]), len(thick["rooms"]))
+        # no wall from the stair treads or the desks
+        for w in thin["walls"]:
+            mx, my = (w["a"][0] + w["b"][0]) / 2, (w["a"][1] + w["b"][1]) / 2
+            self.assertFalse(55 <= mx <= 145 and 295 <= my <= 360, f"stair read as wall: {w}")
+            self.assertFalse(615 <= mx <= 800 and 75 <= my <= 100, f"desk read as wall: {w}")
+        from floorplan.pipeline import _quality, _wall_lengths
+        ref = max(_wall_lengths(thin)[0], _wall_lengths(thick)[0])
+        self.assertGreater(_quality(thin, ref), _quality(thick, ref), "auto would choose the thin-line reading")
+
+    def test_open_corner_is_closed(self):
+        from floorplan.walls import Wall, close_corners
+
+        h = Wall((0.0, 0.0), (95.0, 0.0), 4, orientation="h")      # stops 5 px short of the corner
+        v = Wall((100.0, 6.0), (100.0, 80.0), 4, orientation="v")  # starts 6 px below it
+        self.assertEqual(close_corners([h, v], tol=4, max_gap=20), 1)
+        self.assertEqual(h.b, (100.0, 0.0))
+        self.assertEqual(v.a, (100.0, 0.0))
+        far = Wall((100.0, 60.0), (100.0, 80.0), 4, orientation="v")   # 60 px away: not a corner gap
+        h2 = Wall((0.0, 0.0), (95.0, 0.0), 4, orientation="h")
+        self.assertEqual(close_corners([h2, far], tol=4, max_gap=20), 0)
+
     def test_dimension_parsing(self):
         self.assertEqual(parse_dimension("5.20 m"), (5.2, "m"))
         self.assertEqual(parse_dimension("4200"), (4.2, "assumed mm"))

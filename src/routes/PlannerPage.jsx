@@ -46,6 +46,9 @@ import DesignPanel from "../components/panels/DesignPanel.jsx";
 import NetworkPanel from "../components/panels/NetworkPanel.jsx";
 import DataPanel from "../components/panels/DataPanel.jsx";
 import AlignmentPanel from "../components/panels/AlignmentPanel.jsx";
+import CablingPanel from "../components/panels/CablingPanel.jsx";
+import useCableOverlay from "../hooks/useCableOverlay.js";
+import CapacityPanel from "../components/panels/CapacityPanel.jsx";
 import EditorMenu, {
   EditorQuickTools,
   PredictionMenu,
@@ -74,7 +77,8 @@ import { DEFAULT_LEGEND_SECTIONS } from "../components/planner/MapLegend.jsx";
 import PropertyMenu from "../components/planner/PropertyMenu.jsx";
 import WorkspaceFooter from "../components/planner/WorkspaceFooter.jsx";
 
-const defaultSource = (kind, p, floorId) => ({
+// heights for a newly placed source come from Network & RF (plan.rf)
+const defaultSource = (kind, p, floorId, rf = {}) => ({
   id: uid(),
   floorId,
   kind,
@@ -83,7 +87,7 @@ const defaultSource = (kind, p, floorId) => ({
   antennaPattern: "omni",
   x: p.x,
   z: p.z,
-  heightM: kind === "wifi" ? 2.7 : 3,
+  heightM: kind === "wifi" ? num(rf.newApHeightM, 2.7) : num(rf.newCellHeightM, 3),
   txPowerDbm: kind === "wifi" ? 20 : 30,
   freqMHz: kind === "wifi" ? 2400 : 3500,
   antennaGainDbi: 0,
@@ -149,7 +153,7 @@ const findRoomWallPlacement = (rooms, point, openingWidth, tolerance) => {
 export default function PlannerPage() {
   const { projectId, section } = useParams();
   const navigate = useNavigate();
-  const tab = ["design", "network", "data", "alignment"].includes(section)
+  const tab = ["design", "network", "data", "alignment", "cabling", "capacity"].includes(section)
     ? section
     : "design";
   const setTab = (value) => navigate(`/projects/${projectId}/${value}`);
@@ -165,6 +169,8 @@ export default function PlannerPage() {
     [showRoomNames, setShowRoomNames] = useState(true),
     [showFurnitureNames, setShowFurnitureNames] = useState(true),
     [showWifiNames, setShowWifiNames] = useState(true),
+    [showMeasurements, setShowMeasurements] = useState(false),
+    [showCables, setShowCables] = useState(false),
     [message, setMessage] = useState(""),
     [saveState, setSaveState] = useState("Saved"),
     [busy, setBusy] = useState(false);
@@ -191,12 +197,92 @@ export default function PlannerPage() {
   const saveTimer = useRef(null),
     version = useRef(0),
     loaded = useRef(false);
+  // ---- undo / redo -----------------------------------------------------------
+  // Every edit goes through mutate. Edits less than HISTORY_GAP_MS apart (the
+  // pointer moves of one drag, a typed number) are one undo step.
+  const HISTORY_LIMIT = 100,
+    HISTORY_GAP_MS = 500;
+  const planRef = useRef(plan);
+  planRef.current = plan;
+  const history = useRef({ past: [], future: [], last: 0 });
+  const [historySize, setHistorySize] = useState({ past: 0, future: 0 });
+  const syncHistory = () =>
+    setHistorySize({
+      past: history.current.past.length,
+      future: history.current.future.length,
+    });
+  const resetHistory = () => {
+    history.current = { past: [], future: [], last: 0 };
+    syncHistory();
+  };
   const mutate = useCallback((fn) => {
+    const h = history.current,
+      now = Date.now();
+    if (now - h.last > HISTORY_GAP_MS) {
+      h.past.push(planRef.current);
+      if (h.past.length > HISTORY_LIMIT) h.past.shift();
+      h.future = [];
+      syncHistory();
+    }
+    h.last = now;
     setPlan((old) => {
       const next = typeof fn === "function" ? fn(old) : fn;
       return next;
     });
     setSaveState("Unsaved");
+  }, []);
+  // step through the history; view preferences are not part of an edit
+  const stepHistory = (from, to) => {
+    const h = history.current;
+    if (!h[from].length) return;
+    const current = planRef.current,
+      target = h[from].pop();
+    h[to].push(current);
+    h.last = 0;
+    syncHistory();
+    setPlan({ ...target, preferences: current.preferences });
+    setSaveState("Unsaved");
+    // drop a selection the restored plan no longer has
+    setSelected((sel) => {
+      const key = sel && listKey[sel.type];
+      return !key || (target[key] || []).some((x) => x.id === sel.id)
+        ? sel
+        : null;
+    });
+  };
+  // Static locks dragging whole rooms and boundaries (property menu and footer)
+  const setStatic = (value) =>
+    mutate((p) => ({
+      ...p,
+      property: { ...p.property, static: value },
+    }));
+  const undo = () => stepHistory("past", "future");
+  const redo = () => stepHistory("future", "past");
+  const undoKeys = useRef();
+  // the shortcuts belong to the editor, like the footer buttons
+  undoKeys.current = { undo, redo, active: tab === "design" };
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!undoKeys.current.active || !(e.ctrlKey || e.metaKey) || e.altKey)
+        return;
+      // text fields keep their own undo
+      const t = e.target;
+      if (
+        t?.isContentEditable ||
+        ["INPUT", "TEXTAREA", "SELECT"].includes(t?.tagName)
+      )
+        return;
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undoKeys.current.undo();
+      } else if (k === "y" || (k === "z" && e.shiftKey)) {
+        e.preventDefault();
+        undoKeys.current.redo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
   useEffect(() => {
     if (!project || !loaded.current) return;
@@ -214,6 +300,7 @@ export default function PlannerPage() {
       showRoomNames,
       showFurnitureNames,
       showWifiNames,
+      showMeasurements,
     };
     if (JSON.stringify(plan.preferences) === JSON.stringify(preferences))
       return;
@@ -233,6 +320,7 @@ export default function PlannerPage() {
     showRoomNames,
     showFurnitureNames,
     showWifiNames,
+    showMeasurements,
     project?.id,
     plan.preferences,
   ]);
@@ -264,6 +352,7 @@ export default function PlannerPage() {
       const pref = restored.preferences || {};
       setProject(item);
       setPlan(restored);
+      resetHistory();
       setProjectName(item.name);
       setView(pref.view || "2d");
       setHeatmap(Boolean(pref.heatmap));
@@ -284,6 +373,7 @@ export default function PlannerPage() {
       setShowRoomNames(pref.showRoomNames !== false);
       setShowFurnitureNames(pref.showFurnitureNames !== false);
       setShowWifiNames(pref.showWifiNames !== false);
+      setShowMeasurements(pref.showMeasurements === true);
       setSelected(null);
       setPanelMode("selection");
       setSaveState("Saved");
@@ -403,8 +493,9 @@ export default function PlannerPage() {
       // under way); empty until a prediction has been run
       const showSnr = predictionMetric === "snr";
       const snrWeak = Number(predictionRanges[0]?.max ?? 10);
+      // an old prediction is left out once the plan has no AP left (it no longer applies)
       const cells =
-        rt.active && rt.maps[floorId]
+        rt.active && rt.maps[floorId] && !prediction.noApsLeft
           ? rt.maps[floorId].map((cell) =>
               showSnr
                 ? {
@@ -436,6 +527,7 @@ export default function PlannerPage() {
       optimization.view,
       heatRanges,
       optThreshold,
+      prediction.noApsLeft,
     ]),
     warnings = useMemo(() => overlapWarnings(rooms), [rooms]),
     nestedNotes = useMemo(() => nestedRoomNotes(rooms), [rooms]),
@@ -795,7 +887,7 @@ export default function PlannerPage() {
       setTool("select");
     }
     if (kind === "cellular" || kind === "wifi") {
-      const s = defaultSource(kind, p, floorId);
+      const s = defaultSource(kind, p, floorId, plan.rf);
       mutate((old) => ({ ...old, sources: [...old.sources, s] }));
       selectEntity({ type: "source", id: s.id });
     }
@@ -1009,33 +1101,90 @@ export default function PlannerPage() {
       };
     });
   };
-  const movePolygonPart = (roomId, vertexIndex, dx, dz, mode) => {
-    mutate((p) => ({
-      ...p,
-      rooms: p.rooms.map((room) => {
-        if (room.id !== roomId || room.shape !== "polygon") return room;
-        const polygonPoints = pointsOf(room).map((point) => ({ ...point }));
-        const indices =
-          mode === "edge"
-            ? [vertexIndex, (vertexIndex + 1) % polygonPoints.length]
-            : [vertexIndex];
-        for (const index of indices) {
-          polygonPoints[index] = {
-            x: polygonPoints[index].x + dx,
-            z: polygonPoints[index].z + dz,
-          };
-        }
-        const updated = { ...room, polygonPoints };
-        const bounds = bbox(updated);
+  // Drag one vertex, or one edge (vertices index and index + 1), of a room,
+  // a building boundary or an interior wall. A rectangle room becomes a
+  // polygon on its first reshape; its doors and windows move from wall sides
+  // to edge indices so they stay where they were.
+  const moveShapePart = (type, id, vertexIndex, dx, dz, mode) => {
+    const shift = (points) => {
+      const out = points.map((point) => ({ x: point.x, z: point.z }));
+      const indices =
+        mode === "edge"
+          ? [vertexIndex, (vertexIndex + 1) % out.length]
+          : [vertexIndex % out.length];
+      for (const index of indices)
+        out[index] = { x: out[index].x + dx, z: out[index].z + dz };
+      return out;
+    };
+    mutate((p) => {
+      if (type === "wall")
         return {
-          ...updated,
-          x: bounds.minX,
-          z: bounds.minZ,
-          width: bounds.maxX - bounds.minX,
-          depth: bounds.maxZ - bounds.minZ,
+          ...p,
+          interiorWalls: p.interiorWalls.map((w) => {
+            if (w.id !== id) return w;
+            const [a, b] = shift([
+              { x: +w.x1, z: +w.z1 },
+              { x: +w.x2, z: +w.z2 },
+            ]);
+            return { ...w, x1: a.x, z1: a.z, x2: b.x, z2: b.z };
+          }),
         };
-      }),
-    }));
+      if (type === "boundary")
+        return {
+          ...p,
+          boundaries: (p.boundaries || []).map((b) =>
+            b.id === id ? { ...b, points: shift(b.points) } : b,
+          ),
+        };
+      const room = p.rooms.find((r) => r.id === id);
+      // circles keep their own radius editing
+      if (!room || room.shape === "circle") return p;
+      const wasRectangle = room.shape !== "polygon";
+      const polygonPoints = shift(pointsOf(room));
+      const updated = { ...room, shape: "polygon", polygonPoints };
+      const bounds = bbox(updated);
+      const rooms = p.rooms.map((r) =>
+        r.id === id
+          ? {
+              ...updated,
+              x: bounds.minX,
+              z: bounds.minZ,
+              width: bounds.maxX - bounds.minX,
+              depth: bounds.maxZ - bounds.minZ,
+            }
+          : r,
+      );
+      if (!wasRectangle) return { ...p, rooms };
+      // rectangle vertices run NW, NE, SE, SW: edge i is side SIDES[i], and
+      // south / west offsets were measured against the edge direction
+      const SIDES = ["north", "east", "south", "west"];
+      const b0 = bbox(room);
+      const toEdge = (o) => {
+        if (o.roomId !== id || Number.isInteger(+o.edgeIndex)) return o;
+        const edgeIndex = SIDES.indexOf(o.wallSide || "east");
+        const length =
+          edgeIndex % 2 === 0 ? b0.maxX - b0.minX : b0.maxZ - b0.minZ;
+        const offset =
+          edgeIndex >= 2
+            ? Math.max(0, length - num(o.offset) - num(o.width))
+            : num(o.offset);
+        return { ...o, edgeIndex, offset };
+      };
+      const wallTypes = { ...(p.wallTypes || {}) };
+      const sideMaterial = SIDES.map((s) => wallTypes[`${id}:${s}`]).filter(Boolean);
+      const material =
+        sideMaterial.length && sideMaterial.every((m) => m === sideMaterial[0])
+          ? sideMaterial[0]
+          : undefined;
+      return {
+        ...p,
+        rooms: material
+          ? rooms.map((r) => (r.id === id ? { ...r, material } : r))
+          : rooms,
+        doors: p.doors.map(toEdge),
+        windows: p.windows.map(toEdge),
+      };
+    });
   };
   const importBuilding = async (file) => {
     if (!file) return;
@@ -1331,7 +1480,104 @@ export default function PlannerPage() {
     }
   };
   const [reportBusy, setReportBusy] = useState(false);
+  // ---- reports of the optimiser's design (not applied to the plan) ---------------------------------------
+  // The plan as Apply would leave it, predicted on that band, then the usual report. Used when the plan has no
+  // APs, or when you choose the optimised design; with your own APs and no choice, the reports are as before.
+  const preferOptimised = (what) =>
+    !window.confirm(
+      `Your plan has access points and there is also an optimiser result.
+
+OK: ${what} of your current access points (as before).
+Cancel: ${what} of the optimised design instead.`,
+    );
+  const predictOnBand = async (somePlan, band, label) => {
+    const { buildSceneZip } = await import("../utils/sceneExport.js");
+    setMessage(`${label}: preparing the ${band} GHz prediction of the optimised design…`);
+    const { blob } = await buildSceneZip(planForBand(somePlan, band), {});
+    const { sceneId } = await uploadScene(blob);
+    const job = await submitSimulation(sceneId, {
+      ...prediction.rtSettings,
+      receiverGainDbi: Number(plan.rf?.rxGainDbi) || 0,
+    });
+    const status = await waitForSimulation(job.id, {
+      onStatus: (phase) => setMessage(`${label}: ${band} GHz prediction of the optimised design · ${phase}…`),
+    });
+    return { jobId: job.id, result: status.result, finishedAt: new Date().toISOString() };
+  };
+  const optimisedLabel = (run) =>
+    `Optimised ${run.settingsUsed.band} GHz design from the optimiser run of ${run.finishedAt ? new Date(run.finishedAt).toLocaleString() : "the saved run"} (not applied to the plan)`;
+  const downloadOptimisedReport = async () => {
+    const run = optimization.opt;
+    setReportBusy(true);
+    try {
+      const band = run.settingsUsed.band;
+      const designed = optimization.optimisedPlan(band);
+      if (!designed) throw Error("The optimiser result could not be loaded: run the optimiser again.");
+      const rtRun = await predictOnBand(designed, band, "Report");
+      const { buildReport } = await import("../utils/reportBuilder.js");
+      const { loadReportLogos } = await import("../utils/reportLogos.js");
+      const blob = await buildReport({
+        logos: await loadReportLogos(),
+        snrRanges: getMetricRanges(plan, "snr"),
+        plan: designed,
+        projectName,
+        rt: rtRun,
+        opt: run,
+        ranges: weakRanges,
+        thresholdDbm: weakBelowDbm,
+        getMap: (jobId, file) => getRtMap(jobId, file),
+        onProgress: (text) => setMessage(`Building report of the optimised design: ${text}…`),
+        designLabel: optimisedLabel(run),
+      });
+      downloadBlob(blob, `${(projectName || "plan").replace(/[^w.-]+/g, "_")}-optimised-${band}GHz-wifi-report.docx`);
+      setMessage("Report of the optimised design downloaded.");
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setReportBusy(false);
+    }
+  };
+  const downloadOptimisedComparison = async () => {
+    setCompareBusy(true);
+    try {
+      const planByBand = {};
+      const runs = {};
+      for (const band of COMPARED_BANDS) {
+        planByBand[band] = optimization.optimisedPlan(band);
+        if (!planByBand[band]) throw Error(`The ${band} GHz optimiser result could not be loaded: run the optimiser again.`);
+        runs[band] = await predictOnBand(planByBand[band], band, "Comparison");
+      }
+      const { buildBandComparisonReport } = await import("../utils/reportCompare.js");
+      const { loadReportLogos } = await import("../utils/reportLogos.js");
+      const when = optimization.altRuns[COMPARED_BANDS[0]]?.finishedAt;
+      const blob = await buildBandComparisonReport({
+        logos: await loadReportLogos(),
+        snrRanges: getMetricRanges(plan, "snr"),
+        plan,
+        planByBand,
+        projectName,
+        runs,
+        ranges: weakRanges,
+        designThr: Number.isFinite(optimization.opt?.threshold) ? optimization.opt.threshold : weakBelowDbm,
+        getMap: (jobId, file) => getRtMap(jobId, file),
+        onProgress: (text) => setMessage(`Building comparison of the optimised designs: ${text}…`),
+        designLabel: `Optimised designs from the optimiser run of ${when ? new Date(when).toLocaleString() : "the saved run"} (not applied to the plan)`,
+      });
+      downloadBlob(blob, `${(projectName || "plan").replace(/[^w.-]+/g, "_")}-optimised-2.4-vs-5GHz-report.docx`);
+      setMessage("Comparison of the optimised designs downloaded.");
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setCompareBusy(false);
+    }
+  };
+
   const downloadReport = async () => {
+    {
+      const hasWifiAps = plan.sources.some((s) => s.kind === "wifi");
+      const proposes = optimization.opt?.result?.recommendations?.length > 0;
+      if (proposes && (!hasWifiAps || preferOptimised("the report"))) return downloadOptimisedReport();
+    }
     setReportBusy(true);
     try {
       const { buildReport } = await import("../utils/reportBuilder.js");
@@ -1363,10 +1609,13 @@ export default function PlannerPage() {
   // service reuses saved ones), then one Word report that compares them.
   const [compareBusy, setCompareBusy] = useState(false);
   const downloadComparison = async () => {
-    if (!plan.sources.some((s) => s.kind === "wifi")) {
-      setMessage("Place Wi-Fi access points first: the comparison uses them.");
+    const hasWifiAps = plan.sources.some((s) => s.kind === "wifi");
+    const bothRuns = COMPARED_BANDS.every((b) => optimization.altRuns?.[b]?.result?.recommendations?.length > 0);
+    if (!hasWifiAps && !bothRuns) {
+      setMessage("Place Wi-Fi access points first, or run the optimiser for 2.4 and 5 GHz: the comparison uses them.");
       return;
     }
+    if (bothRuns && (!hasWifiAps || preferOptimised("the comparison"))) return downloadOptimisedComparison();
     setCompareBusy(true);
     try {
       const [{ buildSceneZip }, { buildBandComparisonReport }] =
@@ -1448,6 +1697,7 @@ export default function PlannerPage() {
     floorId,
     collisionFocus,
   ]);
+  const cableDesign = useCableOverlay(plan, showCables);
   const panelProps = {
     tool,
     setTool,
@@ -1461,6 +1711,8 @@ export default function PlannerPage() {
     showRoomNames,
     showFurnitureNames,
     showWifiNames,
+    showMeasurements,
+    cableDesign,
     selected,
     setSelected: selectEntity,
     panelMode,
@@ -1534,17 +1786,13 @@ export default function PlannerPage() {
     setCollisionFocus,
     rotateSelected,
     rotateWholeBuilding,
-    onStaticChange: (value) =>
-      mutate((p) => ({
-        ...p,
-        property: { ...p.property, static: value },
-      })),
+    onStaticChange: setStatic,
     onShowRoomNamesChange: setShowRoomNames,
     onShowFurnitureNamesChange: setShowFurnitureNames,
     onShowWifiNamesChange: setShowWifiNames,
     place,
     move,
-    movePolygonPart,
+    moveShapePart,
     predictions,
     predictionMetric,
     predictionRanges,
@@ -1560,8 +1808,11 @@ export default function PlannerPage() {
     heatRanges,
     overlay,
     setSelectedFloor,
-    heatmap,
-    heatmapOpacity,
+    // Each map has its own visibility: the optimiser's (B) follows its After / Before / Hide choice and its band,
+    // and shows as soon as a result is there; the prediction's (A) follows its own Hide / Show heatmap switch.
+    heatmap: optOnMap ? Boolean(optimization.opt) && optimization.show !== "off" : heatmap,
+    // an out-of-date prediction is shown faded until the new one is in
+    heatmapOpacity: prediction.stale && mapMode !== "optimise" ? heatmapOpacity * 0.45 : heatmapOpacity,
     logsVisible,
     logGrid,
     metric,
@@ -1647,6 +1898,8 @@ export default function PlannerPage() {
               ["network", "⌁", "Network & RF"],
               ["data", "⇪", "Imports & logs"],
               ["alignment", "⌖", "Geo alignment"],
+              ["cabling", "⌇", "Cabling"],
+              ["capacity", "▤", "Capacity"],
             ].map(([id, icon, label]) => (
               <button
                 key={id}
@@ -1836,6 +2089,13 @@ export default function PlannerPage() {
                     onChange: setShowWifiNames,
                     defaultOn: true,
                   },
+                  {
+                    id: "cables",
+                    label: "Cables (Wi-Fi cabling)",
+                    checked: showCables,
+                    onChange: setShowCables,
+                    defaultOn: false,
+                  },
                 ]}
               />
               <LegendMenu
@@ -1924,9 +2184,12 @@ export default function PlannerPage() {
             {tab === "network" && <NetworkPanel {...panelProps} />}
             {tab === "data" && <DataPanel {...panelProps} />}
             {tab === "alignment" && <AlignmentPanel {...panelProps} />}
+            {tab === "cabling" && <CablingPanel {...panelProps} projectName={projectName} />}
+            {tab === "capacity" && <CapacityPanel {...panelProps} rtMaps={rt.active ? rt.maps : null} />}
           </main>
         </div>
       </div>
+      {tab === "design" && (
       <WorkspaceFooter
         view={view}
         onViewChange={setView}
@@ -1941,7 +2204,16 @@ export default function PlannerPage() {
         area={totalArea}
         sources={sources.length}
         saveState={saveState}
+        onUndo={undo}
+        onRedo={redo}
+        canUndo={historySize.past > 0}
+        canRedo={historySize.future > 0}
+        showMeasurements={showMeasurements}
+        onShowMeasurementsChange={setShowMeasurements}
+        isStatic={plan.property?.static !== false}
+        onStaticChange={setStatic}
       />
+      )}
     </div>
   );
 }

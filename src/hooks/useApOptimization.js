@@ -13,6 +13,8 @@ import { DEFAULT_NOISE_FLOORS, useModelVersion } from "./useRayTracedPrediction.
 import {
   isMissingResult,
   planStamp,
+  bandStamp,
+  buildingStamp,
   replaceSavedResult,
 } from "../utils/savedResults.js";
 import {
@@ -40,12 +42,14 @@ const DEFAULTS = {
   targetCoveragePct: 95,
   objective: "min-aps", // min-aps | max-coverage
   budget: 4,
+  capNewAps: null, // optional limit for "fewest APs for the target" (null = no limit)
   redundancy: 1,
   existingHandling: "fixed",
   apRoles: {}, // reuse: access point id -> "fixed" | "move" | "free" (default free)
   allowNewAps: false,
   mounting: { wall: true, ceiling: false },
   wallHeightM: 2.5,
+  ceilingDropM: 0.05, // ceiling APs hang this far below each room's ceiling
   wallSpacingM: 1.5,
   ceilingSpacingM: 3,
   cornerClearanceM: 0.5,
@@ -156,6 +160,7 @@ export function useApOptimization({ plan, mutate, setHeatmap, rtActiveOff,
     () => ({
       mounting: ["wall", "ceiling"].filter((m) => settings.mounting[m]),
       wallHeightM: settings.wallHeightM,
+      ceilingDropM: settings.ceilingDropM,
       wallSpacingM: settings.wallSpacingM,
       ceilingSpacingM: settings.ceilingSpacingM,
       cornerClearanceM: settings.cornerClearanceM,
@@ -197,9 +202,12 @@ export function useApOptimization({ plan, mutate, setHeatmap, rtActiveOff,
         settings.objective === "max-coverage"
           ? null
           : settings.targetCoveragePct,
-      // the budget limits new APs only when maximising coverage
+      // "best with AP budget": the budget is required; "fewest APs for the target": an optional cap (empty = the
+      // optimiser decides how many the target needs)
       budget:
-        settings.objective === "max-coverage" ? settings.budget : undefined,
+        settings.objective === "max-coverage"
+          ? settings.budget
+          : settings.capNewAps ?? undefined,
       redundancy: settings.redundancy,
       existingHandling: handlingOf(settings),
       ...(handlingOf(settings) === "reuse"
@@ -278,6 +286,8 @@ export function useApOptimization({ plan, mutate, setHeatmap, rtActiveOff,
       profileUsed: { name: bandProfile.name, band, channel: bandRadio.channel, ...config },
       cached: job.cached,
       planStamp: ctx.stamp,
+      bandStamp: ctx.bandStamps?.[band],
+      buildingStamp: ctx.buildingStamp,
     };
   };
 
@@ -303,6 +313,8 @@ export function useApOptimization({ plan, mutate, setHeatmap, rtActiveOff,
     jobId: run.jobId,
     finishedAt: run.finishedAt,
     planStamp: run.planStamp,
+    bandStamp: run.bandStamp,
+    buildingStamp: run.buildingStamp,
     modelVersion: run.result.model?.modelVersion,
     threshold: run.threshold,
     settingsUsed: run.settingsUsed,
@@ -341,7 +353,11 @@ export function useApOptimization({ plan, mutate, setHeatmap, rtActiveOff,
       const { blob } = await buildSceneZip(plan, {});
       setRun({ phase: "Uploading scene", fraction: 0.02 });
       const { sceneId } = await uploadScene(blob);
-      const ctx = { sceneId, candidates: generated.valid, controller, stamp };
+      const ctx = {
+        sceneId, candidates: generated.valid, controller, stamp,
+        buildingStamp: buildingStamp(plan),
+        bandStamps: Object.fromEntries(bands.map((b) => [b, bandStamp(plan, b)])),
+      };
       const runs = {};
       for (const band of bands) runs[band] = await runBand(band, ctx);
       const best = Object.values(runs).reduce((a, b) => (better(b, a) ? b : a));
@@ -364,8 +380,11 @@ export function useApOptimization({ plan, mutate, setHeatmap, rtActiveOff,
   };
 
   // Look at another band's result from the same run.
+  // switching band shows that band's map straight away (no separate heatmap switch)
   const chooseBand = (band) => {
-    if (altRuns[band]) showRun(altRuns[band], altRuns, recommendedBand);
+    if (!altRuns[band]) return;
+    showRun(altRuns[band], altRuns, recommendedBand);
+    setShow((s) => (s === "off" ? "after" : s));
   };
 
   const cancel = async () => {
@@ -375,19 +394,42 @@ export function useApOptimization({ plan, mutate, setHeatmap, rtActiveOff,
   };
 
   // ---- applying the recommendation ---------------------------------------
-  const applyRecommendations = () => {
-    if (!opt) return;
-    const fields = sourceFieldsFromProfile(profile, opt.settingsUsed.band);
-    fields.profileId = opt.settingsUsed.profileId;
-    const used = opt.profileUsed;
+  // the radio fields of the APs a run proposes: its own band, AP model and radio settings
+  const fieldsForRun = (run) => {
+    const band = run.settingsUsed.band;
+    const runProfile =
+      profiles.find((p) => p.id === run.settingsUsed.profileId && p.bands[band]) ||
+      (profile.bands[band] ? profile : profiles.find((p) => p.bands[band]));
+    const fields = sourceFieldsFromProfile(runProfile, band);
+    fields.profileId = run.settingsUsed.profileId;
+    const used = run.profileUsed;
     if (used) Object.assign(fields, {
       txPowerDbm: used.txPowerDbm, antennaGainDbi: used.gainDbi,
       freqMHz: used.freqMHz,
       ...(used.channel != null ? { channel: Number(used.channel) } : {}),
       ...(used.bandwidthMHz != null ? { bandwidthMHz: used.bandwidthMHz } : {}),
     });
-    mutate((p) => applyOptimization(p, opt.result, fields));
-    setShow("off");
+    return fields;
+  };
+  // The plan as it would be after applying one band's result, WITHOUT changing the project: what the reports
+  // describe when you ask for the optimised design (exactly what Apply would produce). null without a result.
+  const optimisedPlan = (band) => {
+    const run = altRuns[band] || (opt?.settingsUsed.band === band ? opt : null);
+    if (!run) return null;
+    const { optimizationBackup: _b, ...withoutBackup } = applyOptimization(plan, run.result, fieldsForRun(run)); // eslint-disable-line no-unused-vars
+    return withoutBackup;
+  };
+
+  const applyRecommendations = () => {
+    if (!opt) return;
+    const fields = fieldsForRun(opt);
+    // the map keeps showing the result (and the band switch stays); the band is marked as applied, so its result
+    // does not turn "out of date" just because its own APs are now in the plan
+    const band = opt.settingsUsed.band;
+    mutate((p) => ({
+      ...applyOptimization(p, opt.result, fields),
+      optimizationApplied: { ...(p.optimizationApplied || {}), [band]: opt.jobId },
+    }));
   };
 
   // Puts the APs back as they were before Apply.
@@ -398,6 +440,7 @@ export function useApOptimization({ plan, mutate, setHeatmap, rtActiveOff,
     mutate((p) => ({
       ...p,
       sources: p.sources.filter((s) => s.origin !== "optimized"),
+      optimizationApplied: undefined,
     }));
 
   // ---- profile editing (stored in the project) ----------------------------
@@ -429,6 +472,17 @@ export function useApOptimization({ plan, mutate, setHeatmap, rtActiveOff,
     saveProfiles([...profiles, copy]);
     patch({ profileId: copy.id });
   };
+  // new models (manual entry or a file); the first one becomes the chosen model
+  const addProfiles = (models) => {
+    if (!models.length) return;
+    const added = models.map((m) => ({ ...m, id: uid() }));
+    saveProfiles([...profiles, ...added]);
+    const first = added[0];
+    patch({
+      profileId: first.id,
+      band: first.bands[settings.band] ? settings.band : Object.keys(first.bands)[0],
+    });
+  };
   const addBand = (band) =>
     saveProfiles(
       profiles.map((p) =>
@@ -459,7 +513,17 @@ export function useApOptimization({ plan, mutate, setHeatmap, rtActiveOff,
     }));
   };
 
-  const stale = Boolean(opt) && opt.planStamp !== planStamp(plan);
+  // Out of date, per band: a change to the building, or to the existing APs of THIS band. Another band's APs,
+  // and the APs this result's own Apply added, do not count. Older saved results (no band stamp) compare the
+  // whole plan, as before.
+  const applied = Boolean(opt) && plan.optimizationApplied?.[opt.settingsUsed.band] === opt.jobId;
+  const stale =
+    Boolean(opt) &&
+    (applied && opt.buildingStamp
+      ? opt.buildingStamp !== buildingStamp(plan)
+      : opt.bandStamp
+        ? opt.bandStamp !== bandStamp(plan, opt.settingsUsed.band)
+        : opt.planStamp !== planStamp(plan));
   const modelNow = useModelVersion(opt?.jobId);
   const modelOutdated =
     Boolean(opt) &&
@@ -542,6 +606,10 @@ export function useApOptimization({ plan, mutate, setHeatmap, rtActiveOff,
     setPreviewOn,
     opt,
     stale,
+    applied,
+    appliedBands: Object.keys(plan.optimizationApplied || {}).filter(
+      (b) => altRuns[b] && plan.optimizationApplied[b] === altRuns[b].jobId,
+    ),
     modelOutdated,
     fresh,
     setFresh,
@@ -552,12 +620,14 @@ export function useApOptimization({ plan, mutate, setHeatmap, rtActiveOff,
     setView,
     heatCells,
     applyRecommendations,
+    optimisedPlan,
     undoApply,
     hasApplyBackup,
     removeOptimizedAps,
     updateRadio,
     updateProfile,
     duplicateProfile,
+    addProfiles,
     addBand,
     applyProfileToExisting,
     simulationSettings,

@@ -1,0 +1,25 @@
+{
+  "name": "v6 mix: old dataset_v4 (40 %) + hard-case dataset_v6 (60 %)",
+  "classes": ["background", "wall", "door", "window", "floor", "column", "ap",
+              "desk", "chair", "table", "sofa", "plant", "pod", "storage", "stairs", "void"],
+  "sources": [
+    {
+      "root": "dataset_v4",
+      "share": 0.4,
+      "extra_damage": 0.6,
+      "lines": "from_mask",
+      "note": "read in place, never changed; extra damage is applied at load time (labels move with the image)"
+    },
+    {
+      "root": "dataset_v6",
+      "share": 0.6,
+      "extra_damage": 0.0,
+      "lines": "file",
+      "note": "already damaged when rendered (make_dataset_v6.py)"
+    }
+  ],
+  "eval": {
+    "val": "both sources, reported separately and together",
+    "test": "both sources; plus the untouched real plans (train/real_check and the hand-labelled real set)"
+  }
+}

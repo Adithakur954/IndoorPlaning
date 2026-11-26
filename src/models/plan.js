@@ -19,6 +19,8 @@ export const initialPlan = () => ({
     wallLossDb: 8,
     doorLossDb: 3,
     thresholdDbm: -95,
+    newApHeightM: 2.7, // height of a newly placed Wi-Fi AP
+    newCellHeightM: 3, // height of a newly placed cellular site
   },
   logs: [],
   thresholds: {},
@@ -37,5 +39,6 @@ export const initialPlan = () => ({
     showRoomNames: true,
     showFurnitureNames: true,
     showWifiNames: true,
+    showMeasurements: false,
   },
 });

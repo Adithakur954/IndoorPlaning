@@ -16,6 +16,8 @@
     "license:check": "node scripts/check-license-integration.mjs",
     "dev": "node scripts/dev.mjs",
     "build": "vite build",
+    "capacity:build": "node scripts/build-capacity-wasm.mjs",
+    "capacity:test": "cargo test --release --manifest-path capacity/Cargo.toml",
     "start": "node server/index.js",
     "test": "node --experimental-test-module-mocks --test",
     "sim:service": "node scripts/sim-service.mjs"
@@ -26,6 +28,7 @@
     "exceljs": "^3.4.0",
     "express": "^5.1.0",
     "jszip": "^3.10.1",
+    "pptxgenjs": "^3.12.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.18.4",

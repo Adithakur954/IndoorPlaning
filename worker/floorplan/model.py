@@ -1,8 +1,11 @@
 """Learned floor-plan segmentation (U-Net, ONNX) used in place of the colour/ink heuristics.
 
 The network labels every pixel: 0 background, 1 wall, 2 door, 3 window, 4 floor, 5 column, 6 AP marker (a Wi-Fi
-symbol) and, from run5 on, 7 desk, 8 chair, 9 table, 10 sofa, 11 plant, 12 pod/booth, 13 storage (run4 had 7
-classes; the file in use is chosen by MODEL_NAME below, and the wall/door/window/column/AP stage works with both). It was trained from scratch on synthetic plans (see train/ and train/LICENSES.md) and runs on the CPU
+symbol) and, from run5 on, 7 desk, 8 chair, 9 table, 10 sofa, 11 plant, 12 pod/booth, 13 storage, and from run6 on
+14 stairs and 15 void (hatched / filled areas that are not wall: shafts, risers, open to sky). Run4 had 7 classes;
+the file in use is chosen by MODEL_NAME below, and the wall/door/window/column/AP stage works with all of them (stairs
+and voids are never wall ink). Run6 was trained on the dataset_v6 mix (hard cases: dense CAD and RF exports, low
+resolution, hatched voids, overlays) with a connectivity loss; see train/README.md. It was trained from scratch on synthetic plans (see train/ and train/LICENSES.md) and runs on the CPU
 through onnxruntime, so the worker needs no PyTorch. Everything after the mask (wall lines, openings, rooms,
 scale) is the existing geometry code.
 """
@@ -15,13 +18,14 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-# To go back to the previous model, set this to "floorplan_unet_run4.onnx" (or set FLOORPLAN_MODEL).
-MODEL_NAME = "floorplan_unet_run5.onnx"
+# To go back to the previous model, set this to "floorplan_unet_run5.onnx" (or set FLOORPLAN_MODEL).
+MODEL_NAME = "floorplan_unet_run6.onnx"
 MODEL_PATH = Path(os.environ.get("FLOORPLAN_MODEL", Path(__file__).resolve().parents[1] / "models" / MODEL_NAME))
 CLASSES = ["background", "wall", "door", "window", "floor", "column", "ap",
-           "desk", "chair", "table", "sofa", "plant", "pod", "storage"]
+           "desk", "chair", "table", "sofa", "plant", "pod", "storage", "stairs", "void"]
 WALL, DOOR, WINDOW, FLOOR, COLUMN, AP = 1, 2, 3, 4, 5, 6
 DESK, CHAIR, TABLE, SOFA, PLANT, POD, STORAGE = 7, 8, 9, 10, 11, 12, 13
+STAIRS, VOID = 14, 15
 MODEL_MAX_SIDE = 2400      # the network was trained on images up to this size; larger ones are scaled down
 
 _session = None
@@ -58,22 +62,76 @@ def info() -> dict:
     return {"name": MODEL_PATH.name, "classes": CLASSES[: _classes_in_model()], "sizeMB": round(MODEL_PATH.stat().st_size / 1e6, 1)}
 
 
-def segment(bgr: np.ndarray) -> tuple[np.ndarray, dict]:
-    """Label map (uint8, same height and width as `bgr`) and timing info. `bgr` is the OpenCV colour image."""
-    t0 = time.perf_counter()
-    h, w = bgr.shape[:2]
-    f = min(1.0, MODEL_MAX_SIDE / max(h, w))
-    img = bgr if f >= 1.0 else cv2.resize(bgr, (max(8, round(w * f)), max(8, round(h * f))), interpolation=cv2.INTER_AREA)
+TILE = 1536               # drawings larger than MODEL_MAX_SIDE are read at full resolution in tiles of this size
+TILE_OVERLAP = 160         # each tile keeps only its centre; the overlap hides the tile edges
+_cache: list[tuple[bytes, np.ndarray, dict]] = []   # the last few label maps (Auto reads one drawing several times)
+
+
+def _run(img: np.ndarray) -> np.ndarray:
     ih, iw = img.shape[:2]
     ph, pw = (-ih) % 32, (-iw) % 32
     if ph or pw:
         img = cv2.copyMakeBorder(img, 0, ph, 0, pw, cv2.BORDER_REPLICATE)
     x = (img.astype(np.float32) / 127.5 - 1.0).transpose(2, 0, 1)[None]   # BGR, as in training
     logits = _get_session().run(None, {"image": np.ascontiguousarray(x)})[0]
-    labels = logits[0].argmax(0).astype(np.uint8)[:ih, :iw]
-    if f < 1.0:
-        labels = cv2.resize(labels, (w, h), interpolation=cv2.INTER_NEAREST)
-    return labels, {"seconds": round(time.perf_counter() - t0, 3), "inputSize": [iw, ih], "scaledBy": round(f, 4)}
+    return logits[0].argmax(0).astype(np.uint8)[:ih, :iw]
+
+
+def _tiled(bgr: np.ndarray) -> np.ndarray:
+    h, w = bgr.shape[:2]
+    out = np.zeros((h, w), np.uint8)
+    step = TILE - 2 * TILE_OVERLAP
+    for y0 in range(0, max(1, h - 2 * TILE_OVERLAP), step):
+        for x0 in range(0, max(1, w - 2 * TILE_OVERLAP), step):
+            ty, tx = max(0, min(y0, h - TILE)), max(0, min(x0, w - TILE))
+            lab = _run(bgr[ty:ty + TILE, tx:tx + TILE])
+            # keep the tile's centre (its outer TILE_OVERLAP pixels only where the picture ends)
+            ky0 = 0 if ty == 0 else TILE_OVERLAP
+            kx0 = 0 if tx == 0 else TILE_OVERLAP
+            ky1 = lab.shape[0] if ty + lab.shape[0] >= h else lab.shape[0] - TILE_OVERLAP
+            kx1 = lab.shape[1] if tx + lab.shape[1] >= w else lab.shape[1] - TILE_OVERLAP
+            out[ty + ky0:ty + ky1, tx + kx0:tx + kx1] = lab[ky0:ky1, kx0:kx1]
+    return out
+
+
+def segment(bgr: np.ndarray, *, tiles: bool | None = None) -> tuple[np.ndarray, dict]:
+    """Label map (uint8, same height and width as `bgr`) and timing info. `bgr` is the OpenCV colour image.
+
+    A drawing larger than MODEL_MAX_SIDE is read at full resolution in overlapping tiles (thin walls and door
+    gaps survive; set FLOORPLAN_TILES=0 or tiles=False to scale it down instead, which is faster)."""
+    import hashlib
+
+    t0 = time.perf_counter()
+    h, w = bgr.shape[:2]
+    if tiles is None:
+        tiles = os.environ.get("FLOORPLAN_TILES", "1") != "0"
+    key = hashlib.blake2b(np.ascontiguousarray(bgr).tobytes(), digest_size=16).digest() + bytes([tiles]) + str(MODEL_PATH).encode()
+    for k, lab, meta in _cache:
+        if k == key:
+            return lab.copy(), {**meta, "cached": True}
+    if max(h, w) > MODEL_MAX_SIDE and tiles:
+        labels = _tiled(bgr)
+        meta = {"inputSize": [w, h], "scaledBy": 1.0, "tiles": True}
+    else:
+        f = min(1.0, MODEL_MAX_SIDE / max(h, w))
+        img = bgr if f >= 1.0 else cv2.resize(bgr, (max(8, round(w * f)), max(8, round(h * f))), interpolation=cv2.INTER_AREA)
+        labels = _run(img)
+        if f < 1.0:
+            labels = cv2.resize(labels, (w, h), interpolation=cv2.INTER_NEAREST)
+        meta = {"inputSize": [img.shape[1], img.shape[0]], "scaledBy": round(f, 4)}
+    meta["seconds"] = round(time.perf_counter() - t0, 3)
+    _cache.append((key, labels.copy(), meta))
+    del _cache[:-3]
+    return labels, meta
+
+
+# classes the geometry stage uses to judge walls (vector.building_mask / drop_false_walls)
+GEOMETRY_CLASSES = {
+    "inside": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    "wall": [1, 5],
+    "opening": [2, 3],
+    "clutter": [7, 8, 9, 10, 11, 12, 13, 14, 15],
+}
 
 
 def blobs(mask: np.ndarray, min_area: float) -> list[dict]:
@@ -128,7 +186,8 @@ def structure(labels: np.ndarray) -> dict:
 PALETTE_BGR = {WALL: (60, 60, 220), DOOR: (60, 190, 60), WINDOW: (220, 140, 40), FLOOR: (150, 235, 240),
                COLUMN: (200, 60, 170), AP: (0, 140, 255),
                DESK: (0, 215, 255), CHAIR: (230, 120, 20), TABLE: (0, 165, 255), SOFA: (180, 105, 255),
-               PLANT: (60, 180, 75), POD: (170, 170, 60), STORAGE: (120, 120, 120)}
+               PLANT: (60, 180, 75), POD: (170, 170, 60), STORAGE: (120, 120, 120),
+               STAIRS: (220, 60, 180), VOID: (130, 130, 255)}
 
 
 def overlay(bgr: np.ndarray, labels: np.ndarray, alpha: float = 0.5) -> np.ndarray:

@@ -20,6 +20,31 @@ export const planStamp = (plan) =>
     plan.materialOverrides,
   ]);
 
+// The building only (no access points): what every band's result depends on.
+export const buildingStamp = (plan) =>
+  JSON.stringify([
+    plan.floors,
+    plan.rooms,
+    plan.boundaries,
+    plan.doors,
+    plan.windows,
+    plan.interiorWalls,
+    plan.wallTypes,
+    plan.wallThickness,
+    plan.materialOverrides,
+  ]);
+
+// What ONE band's optimisation depends on: the building and that band's own APs. Another band's APs do not
+// change it (applying the 2.4 GHz result leaves the 5 GHz result valid), and neither do the APs an Apply of
+// the optimiser added (origin "optimized"): applying a result does not make that result out of date.
+export const bandStamp = (plan, band) =>
+  JSON.stringify([
+    buildingStamp(plan),
+    (plan.sources || [])
+      .filter((s) => s.kind === "wifi" && String(s.band ?? "") === String(band) && s.origin !== "optimized")
+      .map((s) => [s.id, s.floorId, s.x, s.z, s.heightM, s.txPowerDbm, s.antennaGainDbi, s.freqMHz, s.channel, s.bandwidthMHz]),
+  ]);
+
 // Points the project at the new run and removes the old run's files.
 export const savedJobIds = (reference) => [...new Set([
   ...(typeof reference === "string" ? [reference] : [reference?.jobId]),

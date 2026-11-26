@@ -152,3 +152,47 @@ test("no internet or external server is needed for activation and validation", a
   }
   assert.throws(() => publicKeyFromRaw("bad"), /Invalid license public key/);
 });
+
+test("a license without a feature list is a Wi-Fi license; cellular needs the signed feature", async (t) => {
+  const { featureAllowed } = await import("../licensing/protocol.js");
+  const f = fixture(t);
+  const old = await f.client.activate(f.issue());
+  assert.deepEqual(old.features, ["wifi"]);
+  assert.equal(featureAllowed(old, "wifi"), true);
+  assert.equal(featureAllowed(old, "cellular"), false);
+
+  const both = await f.client.activate(
+    f.issue({ features: ["wifi", "cellular"] }),
+  );
+  assert.deepEqual(both.features, ["wifi", "cellular"]);
+  assert.equal(featureAllowed(both, "cellular"), true);
+});
+
+test("unknown features are ignored and a malformed feature list is refused", async (t) => {
+  const f = fixture(t);
+  const grant = await f.client.activate(
+    f.issue({ features: ["cellular", "future-module"] }),
+  );
+  assert.deepEqual(grant.features, ["cellular"]);
+  await assert.rejects(
+    f.client.activate(f.issue({ features: "cellular" })),
+    /contents/,
+  );
+  await assert.rejects(
+    f.client.activate(f.issue({ features: [1] })),
+    /contents/,
+  );
+});
+
+test("a feature list cannot be added by editing a signed key", async (t) => {
+  const f = fixture(t);
+  const [prefix, encoded, signature] = f.issue().split(".");
+  const edited = JSON.parse(Buffer.from(encoded, "base64url"));
+  edited.features = ["wifi", "cellular"];
+  await assert.rejects(
+    f.client.activate(
+      `${prefix}.${Buffer.from(JSON.stringify(edited)).toString("base64url")}.${signature}`,
+    ),
+    /signature/,
+  );
+});

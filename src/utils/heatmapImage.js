@@ -30,10 +30,18 @@ export function interpolateHeatmap(
 ) {
   if (!cells.length) return null;
   const step = cells[0].step;
-  const x0 = Math.min(...cells.map((c) => c.x)),
-    z0 = Math.min(...cells.map((c) => c.z));
-  const nx = Math.round((Math.max(...cells.map((c) => c.x)) - x0) / step) + 1,
-    nz = Math.round((Math.max(...cells.map((c) => c.z)) - z0) / step) + 1;
+  let x0 = Infinity,
+    z0 = Infinity,
+    x1 = -Infinity,
+    z1 = -Infinity;
+  for (const c of cells) {
+    if (c.x < x0) x0 = c.x;
+    if (c.x > x1) x1 = c.x;
+    if (c.z < z0) z0 = c.z;
+    if (c.z > z1) z1 = c.z;
+  }
+  const nx = Math.round((x1 - x0) / step) + 1,
+    nz = Math.round((z1 - z0) / step) + 1;
   const grid = new Float32Array(nx * nz).fill(NaN);
   for (const c of cells)
     grid[Math.round((c.z - z0) / step) * nx + Math.round((c.x - x0) / step)] =
@@ -47,38 +55,60 @@ export function interpolateHeatmap(
     height = Math.max(1, Math.round(heightM * scale));
   const data = new Uint8ClampedArray(width * height * 4);
   const smooth = (t) => t * t * (3 - 2 * t);
+  // Column lookups are the same for every row: compute them once.
+  const ix0 = new Int32Array(width),
+    ix1 = new Int32Array(width),
+    txs = new Float32Array(width);
+  for (let px = 0; px < width; px++) {
+    const fx = Math.min(Math.max((px + 0.5) / scale / step - 0.5, 0), nx - 1);
+    ix0[px] = Math.floor(fx);
+    ix1[px] = Math.min(ix0[px] + 1, nx - 1);
+    txs[px] = smooth(fx - ix0[px]);
+  }
+  // Colour lookups are memoised per 0.1 dB, so the band search runs once per
+  // distinct level instead of once per pixel.
+  const colourCache = new Map();
+  const colour = (v) => {
+    const key = Math.round(v * 10);
+    let rgb = colourCache.get(key);
+    if (!rgb) colourCache.set(key, (rgb = colorAt(key / 10)));
+    return rgb;
+  };
   for (let py = 0; py < height; py++) {
     const fz = Math.min(Math.max((py + 0.5) / scale / step - 0.5, 0), nz - 1);
     const j0 = Math.floor(fz),
       j1 = Math.min(j0 + 1, nz - 1),
       tz = smooth(fz - j0);
+    const row0 = j0 * nx,
+      row1 = j1 * nx;
     for (let px = 0; px < width; px++) {
-      const fx = Math.min(Math.max((px + 0.5) / scale / step - 0.5, 0), nx - 1);
-      const i0 = Math.floor(fx),
-        i1 = Math.min(i0 + 1, nx - 1),
-        tx = smooth(fx - i0);
+      const i0 = ix0[px],
+        i1 = ix1[px],
+        tx = txs[px];
       // Weighted mean of the four neighbours; cells outside the rooms (NaN)
       // are skipped so colour does not bleed in from empty space.
       let sum = 0,
-        weight = 0;
-      for (const [i, j, w] of [
-        [i0, j0, (1 - tx) * (1 - tz)],
-        [i1, j0, tx * (1 - tz)],
-        [i0, j1, (1 - tx) * tz],
-        [i1, j1, tx * tz],
-      ]) {
-        const v = grid[j * nx + i];
-        if (v === v && w > 0) {
-          sum += v * w;
-          weight += w;
-        }
-      }
+        weight = 0,
+        v,
+        w;
+      v = grid[row0 + i0];
+      w = (1 - tx) * (1 - tz);
+      if (v === v && w > 0) (sum += v * w), (weight += w);
+      v = grid[row0 + i1];
+      w = tx * (1 - tz);
+      if (v === v && w > 0) (sum += v * w), (weight += w);
+      v = grid[row1 + i0];
+      w = (1 - tx) * tz;
+      if (v === v && w > 0) (sum += v * w), (weight += w);
+      v = grid[row1 + i1];
+      w = tx * tz;
+      if (v === v && w > 0) (sum += v * w), (weight += w);
       if (!weight) continue;
-      const [r, g, b] = colorAt(sum / weight);
+      const rgb = colour(sum / weight);
       const o = (py * width + px) * 4;
-      data[o] = r;
-      data[o + 1] = g;
-      data[o + 2] = b;
+      data[o] = rgb[0];
+      data[o + 1] = rgb[1];
+      data[o + 2] = rgb[2];
       data[o + 3] = 255;
     }
   }
@@ -101,9 +131,18 @@ export function heatmapCanvas(cells, rooms, ranges, pxPerM) {
   const ctx = canvas.getContext("2d");
   const sx = image.width / image.widthM,
     sz = image.height / image.heightM;
+  // The heatmap is cut to the union of all rooms. Every outline is drawn in the same direction: with one path
+  // and the default "nonzero" rule, a room drawn clockwise inside one drawn anticlockwise (an imported polygon
+  // room inside the rectangular "Floor") cancels out and becomes a hole with no heatmap.
   ctx.beginPath();
   for (const room of rooms) {
-    const points = pointsOf(room);
+    let points = pointsOf(room);
+    let twice = 0;
+    points.forEach((p, i) => {
+      const q = points[(i + 1) % points.length];
+      twice += p.x * q.z - q.x * p.z;
+    });
+    if (twice < 0) points = [...points].reverse();
     points.forEach((p, i) => {
       const px = (p.x - image.x) * sx,
         py = (p.z - image.z) * sz;
