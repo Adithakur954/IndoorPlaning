@@ -379,6 +379,7 @@ export default function DataPanel({
           mutate={mutate}
           floorId={floorId}
           metric={metric}
+          kpiOptions={kpiOptions}
         />
         <div className="row">
           <button onClick={() => setTab("design")}>

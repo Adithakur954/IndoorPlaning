@@ -209,6 +209,7 @@ export default function DesignPanel({
             <CellularLegend cellular={cellular} />
           ) : (
           <MapLegend
+            workspace={workspace}
             optimization={optimization}
             sections={legendSections}
             metric={metric}

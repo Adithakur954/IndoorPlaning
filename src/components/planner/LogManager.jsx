@@ -17,7 +17,7 @@ const numberOrNull = (text) =>
 // Lets the user pick what to remove from the imported logs (a file or session,
 // points outside the building, points without a position, bad values, a floor)
 // and from the other imports (floor images).
-export default function LogManager({ plan, mutate, floorId, metric }) {
+export default function LogManager({ plan, mutate, floorId, metric, kpiOptions = INDOOR_LOG_KPIS }) {
   const [kpi, setKpi] = useState(metric);
   const [min, setMin] = useState("");
   const [max, setMax] = useState("");
@@ -118,7 +118,7 @@ export default function LogManager({ plan, mutate, floorId, metric }) {
                 value={kpi}
                 onChange={(e) => setKpi(e.target.value)}
               >
-                {INDOOR_LOG_KPIS.map((k) => (
+                {kpiOptions.map((k) => (
                   <option key={k.key} value={k.key}>
                     {k.label}
                   </option>

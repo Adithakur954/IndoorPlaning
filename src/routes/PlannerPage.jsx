@@ -433,14 +433,16 @@ export default function PlannerPage() {
   // The prediction uses the same threshold bands as the measurement logs. It
   // is a dBm value (RSSI, otherwise RSRP) or the SNR in dB.
   const predictionMetric =
-    metric === "snr" ? "snr" : metric === "rssi" ? "rssi" : "rsrp";
+    workspace === "cellular"
+      ? metric === "sinr" ? "sinr" : "rsrp"
+      : metric === "snr" ? "snr" : "rssi";
   const predictionRanges = useMemo(
     () => getMetricRanges(plan, predictionMetric),
     [plan, predictionMetric],
   );
   // "weak" always means weak signal strength in dBm, whichever KPI is shown
   const weakRanges = useMemo(
-    () => getMetricRanges(plan, predictionMetric === "rsrp" ? "rsrp" : "rssi"),
+    () => getMetricRanges(plan, workspace === "cellular" ? "rsrp" : "rssi"),
     [plan, predictionMetric],
   );
   const weakBelowDbm = Number(weakRanges[0]?.max ?? -100);
@@ -459,6 +461,17 @@ export default function PlannerPage() {
     mutate,
     showOnMap: () => setPanelMode("cellular"),
   });
+  // One RSRP / SINR choice: the legend's KPI and the cellular map follow each other.
+  const cellularMetric = cellular.metric,
+    setCellularMetric = cellular.setMetric;
+  useEffect(() => {
+    if (workspace === "cellular" && (metric === "rsrp" || metric === "sinr") && metric !== cellularMetric)
+      setCellularMetric(metric);
+  }, [workspace, metric]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (workspace === "cellular" && metric !== cellularMetric && (metric === "rsrp" || metric === "sinr"))
+      setMetric(cellularMetric);
+  }, [workspace, cellularMetric]); // eslint-disable-line react-hooks/exhaustive-deps
   const optimization = useApOptimization({
     plan, mutate, setHeatmap,
     noiseSettings: prediction.rtSettings,

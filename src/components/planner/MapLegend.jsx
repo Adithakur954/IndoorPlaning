@@ -6,7 +6,7 @@ import { openEndedBands } from "../../utils/logOverlay.js";
 
 export const LEGEND_SECTIONS = [
   { id: "kpi", label: "KPI colour bands (while a prediction or logs are shown)" },
-  { id: "access", label: "Access points" },
+  { id: "access", label: "Access points / antennas" },
   { id: "structure", label: "Building structure" },
   { id: "measured", label: "Measured log points" },
 ];
@@ -38,13 +38,17 @@ export default function MapLegend({
   kpiOptions = INDOOR_LOG_KPIS,
   metricRanges = [],
   optimization,
+  workspace = "wifi",
 }) {
   const [open, setOpen] = useState(true);
+  const isCellular = workspace === "cellular";
   const coverageView = predictionRanges.length === 2 && provenance === "opt";
   const show = (id) =>
     sections.includes(id) && (id !== "kpi" || kpiOnMap) && (id !== "measured" || hasLogs);
-  // RSSI and RSRP (dBm) and SNR (dB) have a predicted heatmap; the others are log colours only
-  const dbmKpi = metric === "rssi" || metric === "rsrp" || metric === "snr";
+  // the predicted heatmap's KPIs: RSSI (dBm) and SNR (dB) for Wi-Fi, RSRP (dBm)
+  // and SINR (dB) for cellular; the others are log colours only
+  const mapKpis = isCellular ? ["rsrp", "sinr"] : ["rssi", "snr"];
+  const dbmKpi = mapKpis.includes(metric);
   const kpi = INDOOR_LOG_KPIS.find((k) => k.key === metric);
   const bands = openEndedBands(dbmKpi ? predictionRanges : metricRanges);
   if (!LEGEND_SECTIONS.some((s) => show(s.id)) && !(provenance === "opt" && optimization?.opt))
@@ -96,7 +100,7 @@ export default function MapLegend({
                       ? "Covered"
                       : "Not covered"
                     : dbmKpi
-                      ? bandLabel(band, metric === "snr" ? "dB" : "dBm")
+                      ? bandLabel(band, metric === "snr" || metric === "sinr" ? "dB" : "dBm")
                       : bandLabel(band, kpi?.unit)}
                 </div>
               ))}
@@ -104,8 +108,8 @@ export default function MapLegend({
                 <small className="map-legend-note">
                   {dbmKpi || coverageView
                     ? PROVENANCE[provenance]
-                    : `${kpi?.label || metric}: colours for measured logs. The predicted heatmap is only available for RSSI, RSRP and SNR.`}
-                  {metric === "snr" && !coverageView && (
+                    : `${kpi?.label || metric}: colours for measured logs. The predicted heatmap is only available for ${isCellular ? "RSRP and SINR" : "RSSI and SNR"}.`}
+                  {!isCellular && metric === "snr" && !coverageView && (
                     <> SNR = strongest AP's signal minus the channel's noise floor (no interference).</>
                   )}
                 </small>
@@ -123,10 +127,10 @@ export default function MapLegend({
           )}
           {show("access") && (
           <section>
-            <h4>Access points</h4>
+            <h4>{isCellular ? "Antennas" : "Access points"}</h4>
             <div className="map-legend-row">
-              <i className="dot" style={{ background: "#7c3aed" }} />
-              Existing / manual AP
+              <i className="dot" style={{ background: isCellular ? "#0e7490" : "#7c3aed" }} />
+              {isCellular ? "Cellular antenna" : "Existing / manual AP"}
             </div>
             {overlay?.recommended?.length > 0 && (
               <div className="map-legend-row">
