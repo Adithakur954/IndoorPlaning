@@ -133,7 +133,6 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
       {editor && (<>
       {/* ---------- prediction ---------- */}
       <section className="inspector-section">
-        <h4>Prediction</h4>
         {!c.carriers.length ? (
           <p className="hint">
             Add a band (e.g. 3500 MHz) in {toNetwork || "Network & RF"} to run a prediction.
@@ -173,7 +172,7 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
           onClick={cellular.runPrediction}
           disabled={cellular.busy || !carrier || cellular.problems.length > 0}
         >
-          {cellular.busy ? `${cellular.run.phase}…` : "Run cellular prediction"}
+          {cellular.busy ? `${cellular.run.phase}…` : "Run prediction"}
         </button>
         {cellular.run?.error && <p className="error">{cellular.run.error}</p>}
         {cellular.note && <p className="warn">{cellular.note}</p>}

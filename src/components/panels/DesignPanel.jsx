@@ -334,7 +334,7 @@ export default function DesignPanel({
                 {panelMode === "tools"
                   ? "Tools"
                   : panelMode === "cellular"
-                    ? "Cellular (IBS / DAS)"
+                    ? "Prediction"
                   : panelMode === "prediction"
                     ? "Prediction"
                   : panelMode === "optimize"

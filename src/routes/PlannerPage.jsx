@@ -2104,7 +2104,7 @@ Cancel: ${what} of the optimised design instead.`,
                   aria-pressed={panelMode === "cellular"}
                   onClick={() => openRightPanel("cellular")}
                 >
-                  Cellular
+                  Prediction
                 </button>
               ) : (
                 <PredictionMenu

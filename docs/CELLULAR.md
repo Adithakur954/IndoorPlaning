@@ -23,7 +23,7 @@ results are not affected by anything in it.
 1. Open the **Cellular** workspace (asked on start when the license has both Wi-Fi and cellular;
    with a cellular-only license the app opens there directly) and create or open a Cellular project.
    Each project is Wi-Fi or Cellular, never both.
-   In the editor, press **Cellular**.
+   In the editor, press **Prediction**.
 2. **Network & RF → Bands**: click the bands the building needs (700, 900, 1800, 2100, 2300,
    2500, 3500 MHz), like Wi-Fi's 2.4 / 5 / 6 GHz. Each band can be 4G (LTE) or 5G (NR); the
    3GPP band (e.g. n78 for 5G 3500) is filled in. Set the operator (only shown when typed),
@@ -35,9 +35,9 @@ results are not affected by anything in it.
 4. **Advanced** (collapsed): sectors (each is its own cell on every band it sends), the antenna
    datasheets, another vendor's catalogue (JSON, format below), measured pattern files (`.msi`,
    win within ±15 % of their frequency) and the prediction settings.
-5. Editor → **Cellular** → **Place antenna**; select one to change its model, sector, port power,
+5. Editor → **Prediction** → **Place antenna**; select one to change its model, sector, port power,
    height, mounting, azimuth and downtilt.
-6. Choose the band and **Run cellular prediction**. The map shows RSRP or SINR of the best
+6. Press **Prediction**, choose the band and **Run prediction**. The map shows RSRP or SINR of the best
    cell; the panel gives the share of the floor at or above the target, median and range.
    Each band keeps its latest run, so switching bands needs no new run.
 
