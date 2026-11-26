@@ -7,6 +7,7 @@ import FloorplanImport from "../planner/FloorplanImport.jsx";
 import { formatArea, useMeasurementUnit } from "../../utils/measurementUnits.jsx";
 
 export default function DataPanel({
+  workspace = "wifi",
   importBuilding,
   template,
   imageWidth,
@@ -55,6 +56,7 @@ export default function DataPanel({
   return (
     <div className="panel-grid">
       <FloorplanImport
+        workspace={workspace}
         plan={plan}
         floorId={floorId}
         mutate={mutate}

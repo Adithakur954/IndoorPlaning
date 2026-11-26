@@ -71,7 +71,6 @@ import { mergeSharedWall, snapCollidingWalls } from "../utils/wallMerge.js";
 import {
   defaultKpiFor,
   kpisForKind,
-  networkKindOf,
 } from "../utils/indoorLogKpis.js";
 import { DEFAULT_LEGEND_SECTIONS } from "../components/planner/MapLegend.jsx";
 import { useCellularPrediction } from "../hooks/useCellularPrediction.js";
@@ -417,11 +416,8 @@ export default function PlannerPage() {
     sources = plan.sources.filter((s) => s.floorId === floorId),
     floor = plan.floors.find((f) => f.id === floorId);
   // Wi-Fi shows RSSI / DL / UL throughput; cellular shows the other KPIs.
-  const selectedSource =
-    selected?.type === "source"
-      ? plan.sources.find((s) => s.id === selected.id)
-      : null;
-  const networkKind = networkKindOf(sources, selectedSource);
+  // the project's network decides the KPIs (RSRP / SINR ... or RSSI / throughput)
+  const networkKind = workspace;
   const kpiOptions = useMemo(() => kpisForKind(networkKind), [networkKind]);
   useEffect(() => {
     if (!kpiOptions.some((k) => k.key === metric))

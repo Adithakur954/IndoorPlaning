@@ -24,6 +24,8 @@ import {
   newSector,
 } from "../../infra/cellular/model.js";
 import { DEFAULT_CATALOGUE } from "../../infra/cellular/engine/catalogue.js";
+// Sample catalogue typed from the vendor's datasheets (docs/catalogues); added on request only.
+import sampleCatalogue from "../../../docs/catalogues/frog-ibs-antennas.json?raw";
 
 const fmt = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : "–");
 
@@ -52,7 +54,12 @@ function EdgesField({ label, edges, onChange }) {
   );
 }
 
-export default function CellularPanel({ plan, mutate, cellular, floorId, selectedSource, setTool }) {
+// parts "editor": the prediction and the selected antenna (Editor > Cellular);
+// parts "network": carriers, sectors, antenna models and settings (Network & RF),
+// as Wi-Fi keeps its AP profile in Network & RF and its prediction in the editor.
+export default function CellularPanel({ plan, mutate, cellular, floorId, selectedSource, setTool, setTab, parts = "editor" }) {
+  const editor = parts === "editor";
+  const network = parts === "network";
   const c = cellularOf(plan);
   const models = antennaModels(plan);
   const carrier = c.carriers.find((x) => x.id === cellular.carrierId) || null;
@@ -88,15 +95,21 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
   const stats = cellular.hasResult ? cellular.statsFor(floorId) : null;
   const unit = cellular.metric === "sinr" ? "dB" : "dBm";
 
-  const importCatalogue = async (file) => {
-    const { antennas, errors } = parseCatalogue(await file.text());
+  const addCatalogue = (text, name) => {
+    const { antennas, errors } = parseCatalogue(text);
     if (errors.length) {
-      setCatalogueNote({ error: `${file.name} was not imported: ${errors.slice(0, 4).join("; ")}` });
+      setCatalogueNote({ error: `${name} was not imported: ${errors.slice(0, 4).join("; ")}` });
       return;
     }
     setCellular((cur) => ({ ...cur, catalogue: { antennas: { ...cur.catalogue.antennas, ...antennas } } }));
-    setCatalogueNote({ ok: `${Object.keys(antennas).length} antenna models imported from ${file.name}.` });
+    setCatalogueNote({ ok: `${Object.keys(antennas).length} antenna models imported from ${name}.` });
   };
+  const importCatalogue = async (file) => addCatalogue(await file.text(), file.name);
+  const toNetwork = setTab && (
+    <button type="button" className="link-button" onClick={() => setTab("network")}>
+      Network &amp; RF
+    </button>
+  );
   const attachPattern = async (file) => {
     const id = patternTarget;
     if (!id) return;
@@ -111,16 +124,14 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
 
   return (
     <div className="cellular-panel">
-      <p className="hint">
-        Cellular (IBS/DAS) planning. It is separate from Wi-Fi: Wi-Fi APs, the Wi-Fi prediction and the optimiser
-        are not affected.
-      </p>
-
+      {editor && (<>
       {/* ---------- prediction ---------- */}
       <section className="inspector-section">
         <h4>Prediction</h4>
         {!c.carriers.length ? (
-          <p className="hint">Add a carrier below (operator, band, frequency and bandwidth) to run a prediction.</p>
+          <p className="hint">
+            Add a carrier (operator, band, frequency and bandwidth) in {toNetwork || "Network & RF"} to run a prediction.
+          </p>
         ) : (
           <div className="inspector-fields">
             <Field
@@ -305,6 +316,9 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
           <p className="hint">Select an antenna on the plan to edit it.</p>
         )}
       </section>
+      <p className="hint">Carriers, sectors, antenna models and prediction settings: {toNetwork || "Network & RF"}.</p>
+      </>)}
+      {network && (<>
 
       {/* ---------- carriers ---------- */}
       <section className="inspector-section">
@@ -479,9 +493,18 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
             e.target.value = "";
           }}
         />
-        <button type="button" onClick={() => catalogueInput.current?.click()}>
-          Import catalogue…
-        </button>
+        <div className="button-row">
+          <button type="button" onClick={() => catalogueInput.current?.click()}>
+            Import catalogue…
+          </button>
+          <button
+            type="button"
+            title="Frog Cellsat FROG-IBS antennas, typed from the vendor datasheets"
+            onClick={() => addCatalogue(sampleCatalogue, "the Frog IBS sample catalogue")}
+          >
+            Add Frog IBS antennas (sample)
+          </button>
+        </div>
         {catalogueNote?.error && <p className="error">{catalogueNote.error}</p>}
         {catalogueNote?.ok && <p className="hint">{catalogueNote.ok}</p>}
         {Object.values(models).map((m) => {
@@ -584,8 +607,15 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
             <input type="checkbox" checked={c.settings.diffraction} onChange={(e) => patchSettings({ diffraction: e.target.checked })} />
             Diffraction (slower)
           </label>
+          <Field
+            label="New antenna height (m)"
+            type="number"
+            value={plan.rf?.newCellHeightM ?? 3}
+            onChange={(v) => mutate((p) => ({ ...p, rf: { ...p.rf, newCellHeightM: Number(v) } }))}
+          />
         </div>
       </details>
+      </>)}
     </div>
   );
 }

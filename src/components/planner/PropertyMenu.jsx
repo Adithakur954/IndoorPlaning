@@ -36,6 +36,7 @@ export function PropertyOptions({
   onShowFurnitureNamesChange,
   showWifiNames,
   onShowWifiNamesChange,
+  workspace = "wifi",
   onChange,
   onReset,
   fit = false,
@@ -175,7 +176,7 @@ export function PropertyOptions({
           checked={!showWifiNames}
           onChange={(event) => onShowWifiNamesChange(!event.target.checked)}
         />
-        Hide Wi-Fi antenna names
+        Hide {workspace === "cellular" ? "antenna" : "Wi-Fi AP"} names
       </label>
     </>
   );

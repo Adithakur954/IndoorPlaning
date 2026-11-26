@@ -2996,3 +2996,14 @@ p.warn {
 .inspector-fields.mount-height .field:first-child {
   grid-column: auto;
 }
+
+/* an inline text link that is a button (e.g. "Network & RF" in a hint) */
+.link-button {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: #0d7662;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}

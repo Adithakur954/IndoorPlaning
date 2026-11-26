@@ -393,6 +393,7 @@ export default function DesignPanel({
                 floorId={floorId}
                 selectedSource={selected?.type === "source" ? obj : null}
                 setTool={setTool}
+                setTab={setTab}
               />
             ) : panelMode === "optimize" ? (
               <OptimizationPanel
@@ -414,6 +415,7 @@ export default function DesignPanel({
             ) : panelMode === "property" ? (
               <>
               <PropertyOptions
+                workspace={workspace}
                 unit={plan.property?.unit || "m"}
                 onUnitChange={(unit) =>
                   mutate((p) => ({
@@ -448,6 +450,8 @@ export default function DesignPanel({
                 <div className="inspector-fields">
                   {(selected.type === "room"
                     ? roomFieldKeys
+                    : selected.type === "source" && workspace === "cellular"
+                      ? ["name", "x", "z", "heightM"] // the rest is in the Cellular panel
                     : selected.type === "source"
                       ? [
                           "name",
@@ -719,7 +723,12 @@ export default function DesignPanel({
                 {selected.type === "room" && (
                   <RoomMaterials room={obj} plan={plan} mutate={mutate} />
                 )}
-                {selected.type === "source" && (
+                {selected.type === "source" && workspace === "cellular" && (
+                  <button type="button" className="secondary-button" onClick={() => setPanelMode("cellular")}>
+                    Antenna model, sector, power and direction →
+                  </button>
+                )}
+                {selected.type === "source" && workspace === "wifi" && (
                   <div className="sectors">
                     <div className="section-title">
                       <h4>Sectors</h4>

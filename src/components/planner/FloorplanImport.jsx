@@ -32,7 +32,7 @@ const POINT_KEYS = ["A", "B", "C", "D"];
 // stretched (one scale across, another up-down) and one length cannot show it.
 // When the drawing prints its sizes ("190.00 m", "80.00 m"), A-B and C-D are
 // placed on those dimension lines for you to check.
-export default function FloorplanImport({ plan, floorId, mutate, setMessage, setTab, hideImage, showImage }) {
+export default function FloorplanImport({ plan, floorId, mutate, setMessage, setTab, hideImage, showImage, workspace = "wifi" }) {
   const unit = useMeasurementUnit();
   const [upload, setUpload] = useState(null);
   const [pts, setPts] = useState({}); // { A, B, C, D }: preview pixels
@@ -49,7 +49,8 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
   const [replace, setReplace] = useState(true);
   const [engine, setEngine] = useState("auto");   // auto = learned model when available | hybrid | classical
   const [excelMeta, setExcelMeta] = useState(null);   // FloorMeta of an Excel given with the plan: the scale when nothing is printed
-  const [addAps, setAddAps] = useState(true);          // Wi-Fi markers found on the drawing -> access points
+  // Wi-Fi markers found on the drawing -> access points (Wi-Fi projects only)
+  const [addAps, setAddAps] = useState(workspace === "wifi");
   const [error, setError] = useState("");
   const imageRef = useRef(null);
 
@@ -189,7 +190,7 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
         while (taken.has(`AP${apNumber}`));
         return `AP${apNumber}`;
       };
-      const accessPoints = addAps
+      const accessPoints = addAps && workspace === "wifi"
         ? converted.apMarkers.map((m) => ({
             id: uid(),
             floorId,
@@ -358,7 +359,7 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
               </small>
             ))}
           </details>
-          {result.markers?.length > 0 && (
+          {workspace === "wifi" && result.markers?.length > 0 && (
             <label className="check">
               <input type="checkbox" checked={addAps} onChange={(e) => setAddAps(e.target.checked)} />{" "}
               Add the {result.markers.length} Wi-Fi marker{result.markers.length === 1 ? "" : "s"} found on the drawing as access points

@@ -2,14 +2,28 @@ import React, { useState } from "react";
 import Field from "../ui/Field.jsx";
 import { buildSceneGlb, buildSceneZip, downloadBlob } from "../../utils/sceneExport.js";
 import ApProfileEditor from "../planner/ApProfileEditor.jsx";
+import CellularPanel from "../planner/CellularPanel.jsx";
+import { antennaModels } from "../../infra/cellular/model.js";
+
+// Network & RF of one project: the Wi-Fi AP profile in a Wi-Fi project, the
+// cellular network (carriers, sectors, antenna models) in a cellular one.
 export default function NetworkPanel({
   plan,
   mutate,
-  sources,
+  sources: floorSources,
   setTab,
   setSelected,
   optimization,
+  workspace = "wifi",
+  cellular,
+  floorId,
+  setTool,
 }) {
+  const isCellular = workspace === "cellular";
+  const sources = floorSources.filter((s) => (s.kind === "cellular") === isCellular);
+  const sceneSources = isCellular ? "cellular" : "wifi";
+  const transmitters = isCellular ? "antennas" : "access points";
+  const models = isCellular ? antennaModels(plan) : {};
   const [exportState, setExportState] = useState(null);
   const [allFloors, setAllFloors] = useState(true);
   const [furniture, setFurniture] = useState(false);
@@ -19,10 +33,11 @@ export default function NetworkPanel({
       const { blob, config, warnings } = await buildSceneZip(plan, {
         floorIds: allFloors ? undefined : [plan.selectedFloorId],
         includeFurniture: furniture,
+        sources: sceneSources,
       });
       downloadBlob(blob, "ray-tracing-scene.zip");
       setExportState({
-        done: `Exported ${config.meshes.length} meshes, ${config.accessPoints.length} access points.`,
+        done: `Exported ${config.meshes.length} meshes, ${config.accessPoints.length} ${transmitters}.`,
         warnings,
       });
     } catch (error) {
@@ -35,10 +50,11 @@ export default function NetworkPanel({
       const { blob, config, warnings } = await buildSceneGlb(plan, {
         floorIds: allFloors ? undefined : [plan.selectedFloorId],
         includeFurniture: furniture,
+        sources: sceneSources,
       });
       downloadBlob(blob, "indoor-planner-scene.glb");
       setExportState({
-        done: `Exported GLB with ${config.floors.length} floor${config.floors.length === 1 ? "" : "s"} (${config.floors.map((floor) => floor.name).join(", ")}), ${config.meshes.length} meshes and ${config.accessPoints.length} access points.`,
+        done: `Exported GLB with ${config.floors.length} floor${config.floors.length === 1 ? "" : "s"} (${config.floors.map((floor) => floor.name).join(", ")}), ${config.meshes.length} meshes and ${config.accessPoints.length} ${transmitters}.`,
         warnings,
       });
     } catch (error) {
@@ -47,13 +63,30 @@ export default function NetworkPanel({
   };
   return (
     <div className="panel-grid">
-      {optimization && <ApProfileEditor plan={plan} mutate={mutate} optimization={optimization} />}
+      {isCellular ? (
+        <section className="panel">
+          <h2>Cellular network</h2>
+          {cellular && (
+            <CellularPanel
+              parts="network"
+              plan={plan}
+              mutate={mutate}
+              cellular={cellular}
+              floorId={floorId}
+              selectedSource={null}
+              setTool={setTool}
+            />
+          )}
+        </section>
+      ) : (
+        optimization && <ApProfileEditor plan={plan} mutate={mutate} optimization={optimization} />
+      )}
       <section className="panel">
         <h2>Ray-tracing scene export</h2>
         <p>
           Builds the 3D walls, openings and floor slabs shown in the 3D view as
           PLY meshes with a Mitsuba scene file, ITU-R radio materials and the
-          access-point configuration, for a Sionna RT simulation worker. Export
+          {isCellular ? " cellular antennas" : " access-point configuration"}, for a Sionna RT simulation worker. Export
           a GLB as well for general 3D viewers and browser-based tools.
         </p>
         <label>
@@ -89,11 +122,11 @@ export default function NetworkPanel({
         ))}
       </section>
       <section className="panel">
-        <h2>Network sources</h2>
+        <h2>{isCellular ? "Antennas" : "Access points"}</h2>
         <p>
-          Use the Cellular or Wi-Fi tool in the editor to place a source. Select
-          it to configure power, frequency, gain, pattern, sectors, azimuth and
-          mounting height.
+          {isCellular
+            ? "Use the Antenna tool in the editor to place an antenna. Select it to set its model, sector, port power, height, mounting, azimuth and downtilt."
+            : "Use the Wi-Fi AP tool in the editor to place an access point. Select it to configure power, frequency, gain, pattern, azimuth and mounting height."}
         </p>
         {sources.length ? (
           sources.map((s) => (
@@ -105,16 +138,18 @@ export default function NetworkPanel({
                 setSelected({ type: "source", id: s.id });
               }}
             >
-              <span className={s.kind === "wifi" ? "wifi-dot" : "cell-dot"} />
+              <span className={isCellular ? "cell-dot" : "wifi-dot"} />
               <strong>{s.name}</strong>
               <small>
-                {s.freqMHz} MHz · {s.txPowerDbm} dBm
+                {isCellular
+                  ? `${models[s.antennaModelId]?.name || "no model"} · ${s.inputPowerDbm ?? "–"} dBm at port`
+                  : `${s.freqMHz} MHz · ${s.txPowerDbm} dBm`}
               </small>
               →
             </button>
           ))
         ) : (
-          <div className="empty small">No sources on this floor.</div>
+          <div className="empty small">No {transmitters} on this floor.</div>
         )}
       </section>
     </div>
