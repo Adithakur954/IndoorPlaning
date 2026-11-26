@@ -32,19 +32,62 @@ export const DEFAULT_SETTINGS = {
   defaultAntennaModelId: null, // antenna model of a new antenna (null: the built-in omni)
   rsrpTargetDbm: -95,
   sinrTargetDb: 5,
-  // colour band edges of the maps (low to high); editable per project
-  rsrpEdgesDbm: [-105, -95, -85, -75],
+  // colour bands of the maps: edges low to high, one colour per band (one more
+  // than the edges, lowest first). RSRP follows the supplied design's legend.
+  rsrpEdgesDbm: [-120, -114.78, -105.05, -99.78, -94.91, -84.78, -79.65, -74.52, -69.65, -60],
+  rsrpColors: null, // null: RSRP_LEGEND.colors when the edges have its length
   sinrEdgesDb: [0, 5, 10, 20],
+  sinrColors: null,
 };
 
+// RSRP colour scale of the supplied design (10 bands, dBm), lowest band first.
+export const RSRP_LEGEND = {
+  edges: DEFAULT_SETTINGS.rsrpEdgesDbm,
+  colors: [
+    "#2b2b2b", // < -120
+    "#454545", // -120 .. -114.78
+    "#3939c5",
+    "#6187fa",
+    "#50fffd",
+    "#4dff4f",
+    "#fffe54",
+    "#fdd64e",
+    "#fb8545",
+    "#fa2f3f",
+    "#fb34fb", // >= -60
+  ],
+};
+// the simple 5-band scale (the first default)
+export const SIMPLE_RSRP_EDGES = [-105, -95, -85, -75];
+
 const HIGH_IS_GOOD = ["#dc2626", "#f97316", "#eab308", "#84cc16", "#16a34a"];
+
+// n colours from bad to good: the 5-colour scale, interpolated when more bands are asked for
+function scale(n) {
+  if (n <= HIGH_IS_GOOD.length) return HIGH_IS_GOOD.slice(HIGH_IS_GOOD.length - n);
+  const rgb = HIGH_IS_GOOD.map((h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)));
+  return Array.from({ length: n }, (_, i) => {
+    const t = (i / (n - 1)) * (rgb.length - 1);
+    const a = Math.floor(t);
+    const b = Math.min(a + 1, rgb.length - 1);
+    const f = t - a;
+    return `#${rgb[a].map((v, k) => Math.round(v + (rgb[b][k] - v) * f).toString(16).padStart(2, "0")).join("")}`;
+  });
+}
 
 // Colour bands of a cellular map ("rsrp" or "sinr") from the project's edges.
 export function mapRanges(plan, metric) {
   const s = cellularOf(plan).settings;
   const unit = metric === "sinr" ? "dB" : "dBm";
-  const edges = (metric === "sinr" ? s.sinrEdgesDb : s.rsrpEdgesDbm).map(Number).filter(Number.isFinite).sort((a, b) => a - b);
-  const colors = HIGH_IS_GOOD.slice(HIGH_IS_GOOD.length - edges.length - 1);
+  const sinr = metric === "sinr";
+  const edges = (sinr ? s.sinrEdgesDb : s.rsrpEdgesDbm).map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+  const own = sinr ? s.sinrColors : s.rsrpColors;
+  const colors =
+    Array.isArray(own) && own.length === edges.length + 1
+      ? own
+      : !sinr && edges.length === RSRP_LEGEND.edges.length
+        ? RSRP_LEGEND.colors
+        : scale(edges.length + 1);
   return colors.map((color, i) => {
     const min = i === 0 ? -Infinity : edges[i - 1];
     const max = i === edges.length ? Infinity : edges[i];
@@ -56,6 +99,13 @@ export function mapRanges(plan, metric) {
 const uid = () =>
   globalThis.crypto?.randomUUID?.() || `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
+// A project saved with the first default RSRP scale (never edited) gets the
+// current default, so it shows the design legend too.
+function upgradeSettings(s) {
+  const old = Array.isArray(s.rsrpEdgesDbm) && s.rsrpEdgesDbm.join() === SIMPLE_RSRP_EDGES.join() && !s.rsrpColors;
+  return old ? { ...s, rsrpEdgesDbm: DEFAULT_SETTINGS.rsrpEdgesDbm } : s;
+}
+
 export function cellularOf(plan) {
   const c = plan?.cellular || {};
   return {
@@ -63,7 +113,7 @@ export function cellularOf(plan) {
     catalogue: { antennas: { ...(c.catalogue?.antennas || {}) } },
     carriers: Array.isArray(c.carriers) ? c.carriers : [],
     sectors: Array.isArray(c.sectors) && c.sectors.length ? c.sectors : [{ id: "sector-1", name: "Sector 1" }],
-    settings: { ...DEFAULT_SETTINGS, ...(c.settings || {}) },
+    settings: upgradeSettings({ ...DEFAULT_SETTINGS, ...(c.settings || {}) }),
     prediction: c.prediction,
   };
 }

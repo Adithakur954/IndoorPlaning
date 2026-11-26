@@ -21,6 +21,8 @@ import { parseCatalogue, withPatternFile } from "../../infra/cellular/catalogueI
 import {
   antennaModels,
   cellularAntennas,
+  RSRP_LEGEND,
+  SIMPLE_RSRP_EDGES,
   cellularOf,
   defaultAntennaModel,
   newCarrier,
@@ -29,7 +31,7 @@ import {
 
 const fmt = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : "–");
 
-// Up to four colour-band edges typed as "-105, -95, -85, -75"; applied when the box loses focus.
+// Up to twelve colour-band edges typed as "-105, -95, -85, -75"; applied when the box loses focus.
 function EdgesField({ label, edges, onChange }) {
   const [text, setText] = useState(null);
   const apply = () => {
@@ -37,7 +39,7 @@ function EdgesField({ label, edges, onChange }) {
       .split(/[,\s]+/)
       .filter(Boolean)
       .map(Number);
-    if (text !== null && next.length >= 1 && next.length <= 4 && next.every(Number.isFinite))
+    if (text !== null && next.length >= 1 && next.length <= 12 && next.every(Number.isFinite))
       onChange([...next].sort((a, b) => a - b));
     setText(null);
   };
@@ -710,10 +712,25 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
           ].map(([key, label]) => (
             <Field key={key} label={label} type="number" value={c.settings[key]} onChange={(v) => patchSettings({ [key]: Number(v) })} />
           ))}
+          <div className="segmented" role="group" aria-label="RSRP colours">
+            {[
+              ["Design legend (10 bands)", RSRP_LEGEND.edges],
+              ["Simple (5 bands)", SIMPLE_RSRP_EDGES],
+            ].map(([label, edges]) => (
+              <button
+                key={label}
+                type="button"
+                className={c.settings.rsrpEdgesDbm.join() === edges.join() && !c.settings.rsrpColors ? "active" : ""}
+                onClick={() => patchSettings({ rsrpEdgesDbm: edges, rsrpColors: null })}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <EdgesField
             label="RSRP colour edges (dBm, low to high)"
             edges={c.settings.rsrpEdgesDbm}
-            onChange={(edges) => patchSettings({ rsrpEdgesDbm: edges })}
+            onChange={(edges) => patchSettings({ rsrpEdgesDbm: edges, rsrpColors: null })}
           />
           <EdgesField
             label="SINR colour edges (dB, low to high)"

@@ -226,9 +226,17 @@ test("a pattern file is attached to an antenna model and replaces one of the sam
 
 test("map colour bands follow the project's edges", () => {
   const r = mapRanges(initialPlan(), "rsrp");
-  assert.equal(r.length, 5);
-  assert.equal(r[0].max, -105);
-  assert.equal(r[4].min, -75);
+  assert.equal(r.length, 11);
+  assert.equal(r[0].max, -120);
+  assert.equal(r[10].min, -60);
+  assert.equal(r[10].color, "#fb34fb");
+  assert.equal(r[9].min, -69.65);
+  // a project saved with the first 5-band default shows the design legend
+  const old = { ...initialPlan(), cellular: { settings: { rsrpEdgesDbm: [-105, -95, -85, -75] } } };
+  assert.equal(mapRanges(old, "rsrp").length, 11);
+  // more bands than the 5 colours: interpolated, one colour per band
+  const many = { ...initialPlan(), cellular: { settings: { rsrpEdgesDbm: [-110, -100, -95, -90, -85, -80, -70] } } };
+  assert.equal(new Set(mapRanges(many, "rsrp").map((b) => b.color)).size, 8);
   const plan = { ...initialPlan(), cellular: { settings: { rsrpEdgesDbm: [-100, -90] } } };
   assert.deepEqual(mapRanges(plan, "rsrp").map((b) => [b.min, b.max]), [[-Infinity, -100], [-100, -90], [-90, Infinity]]);
   assert.equal(mapRanges(initialPlan(), "sinr")[1].label, "0 to 5 dB");

@@ -206,7 +206,7 @@ export default function DesignPanel({
       >
         <div className="view-stack">
           {workspace === "cellular" && cellular?.hasResult && cellular.show ? (
-            <CellularLegend cellular={cellular} />
+            <CellularLegend cellular={cellular} floorId={floorId} />
           ) : (
           <MapLegend
             workspace={workspace}
