@@ -8,6 +8,8 @@ import { formatArea, useMeasurementUnit } from "../../utils/measurementUnits.jsx
 
 export default function DataPanel({
   workspace = "wifi",
+  onFloorplanBusy,
+  onFloorplanFinished,
   importBuilding,
   template,
   imageWidth,
@@ -57,6 +59,8 @@ export default function DataPanel({
     <div className="panel-grid">
       <FloorplanImport
         workspace={workspace}
+        onBusyChange={onFloorplanBusy}
+        onFinished={onFloorplanFinished}
         plan={plan}
         floorId={floorId}
         mutate={mutate}

@@ -3007,3 +3007,19 @@ p.warn {
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* a task still running behind another tab (e.g. a floor-plan reading) */
+.nav-busy {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: #0d7662;
+  animation: nav-busy-pulse 1.2s ease-in-out infinite;
+}
+@keyframes nav-busy-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}

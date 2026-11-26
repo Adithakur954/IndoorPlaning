@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   fetchDataUrl,
   fileUrl,
@@ -32,7 +32,21 @@ const POINT_KEYS = ["A", "B", "C", "D"];
 // stretched (one scale across, another up-down) and one length cannot show it.
 // When the drawing prints its sizes ("190.00 m", "80.00 m"), A-B and C-D are
 // placed on those dimension lines for you to check.
-export default function FloorplanImport({ plan, floorId, mutate, setMessage, setTab, hideImage, showImage, workspace = "wifi" }) {
+// The reading of a drawing runs on the server and can take minutes: the panel
+// stays mounted (hidden) when another tab is opened, reports what it is doing
+// (onBusyChange) and says when the reading is done (onFinished).
+export default function FloorplanImport({
+  plan,
+  floorId,
+  mutate,
+  setMessage,
+  setTab,
+  hideImage,
+  showImage,
+  workspace = "wifi",
+  onBusyChange,
+  onFinished,
+}) {
   const unit = useMeasurementUnit();
   const [upload, setUpload] = useState(null);
   const [pts, setPts] = useState({}); // { A, B, C, D }: preview pixels
@@ -44,6 +58,9 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
   const [style, setStyle] = useState("auto");
   const [ocr, setOcr] = useState(true);
   const [busy, setBusy] = useState("");
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy]); // eslint-disable-line react-hooks/exhaustive-deps
   const [result, setResult] = useState(null);
   const [view, setView] = useState("overlay.png");
   const [replace, setReplace] = useState(true);
@@ -146,6 +163,7 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
       });
       setResult(done);
       setView("overlay.png");
+      onFinished?.(true);
       // sizes printed on the drawing: A-B and C-D are placed on their dimension lines for you to check (only on
       // the first run of a picture, never over points you placed)
       if (!givenScale) {
@@ -170,6 +188,7 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
       }
     } catch (e) {
       setError(e.message);
+      onFinished?.(false, e.message);
     } finally {
       setBusy("");
     }

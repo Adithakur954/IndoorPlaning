@@ -167,6 +167,10 @@ export default function PlannerPage() {
     : ["design", "network", "data", "alignment", "cabling", "capacity"];
   const tab = tabs.includes(section) ? section : "design";
   const setTab = (value) => navigate(`/projects/${projectId}/${value}`);
+  // the open tab, for callbacks of work that finishes later (a floor-plan reading)
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  const [floorplanBusy, setFloorplanBusy] = useState("");
   const [projectName, setProjectName] = useState(""),
     [view, setView] = useState("2d"),
     [tool, setTool] = useState("select"),
@@ -1983,6 +1987,9 @@ Cancel: ${what} of the optimised design instead.`,
               >
                 <span>{icon}</span>
                 {label}
+                {id === "data" && floorplanBusy && (
+                  <i className="nav-busy" title={`Floor plan: ${floorplanBusy}`} aria-label="Floor plan import running" />
+                )}
               </button>
             ))}
           </nav>
@@ -2265,7 +2272,21 @@ Cancel: ${what} of the optimised design instead.`,
             )}
             {tab === "design" && <DesignPanel {...panelProps} />}
             {tab === "network" && <NetworkPanel {...panelProps} />}
-            {tab === "data" && <DataPanel {...panelProps} />}
+            {/* kept mounted while hidden: a floor-plan reading carries on when another tab is opened */}
+            <div hidden={tab !== "data"}>
+              <DataPanel
+                {...panelProps}
+                onFloorplanBusy={setFloorplanBusy}
+                onFloorplanFinished={(ok, error) => {
+                  if (tabRef.current === "data") return;
+                  setMessage(
+                    ok
+                      ? "The floor plan has been read. Open Imports & logs to check it and add it to the plan."
+                      : `Reading the floor plan failed: ${error}`,
+                  );
+                }}
+              />
+            </div>
             {tab === "alignment" && <AlignmentPanel {...panelProps} />}
             {tab === "cabling" && <CablingPanel {...panelProps} projectName={projectName} />}
             {tab === "capacity" && <CapacityPanel {...panelProps} rtMaps={rt.active ? rt.maps : null} />}
