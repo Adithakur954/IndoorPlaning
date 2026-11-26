@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import JSZip from "jszip";
+import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
+import { PLYLoader } from "three/addons/loaders/PLYLoader.js";
 import {
   areaOf,
   bbox,
@@ -517,6 +519,70 @@ export async function buildSceneZip(plan, options) {
     compression: "DEFLATE",
   });
   return { blob, config, warnings };
+}
+
+export async function buildSceneGlb(plan, options) {
+  const { files, config, warnings } = await buildSceneFiles(plan, options);
+  const zUpScene = new THREE.Group();
+  zUpScene.name = "Indoor Planner scene (Z-up, metres)";
+
+  for (const entry of config.meshes) {
+    const bytes = files[entry.file];
+    if (!bytes) continue;
+    const buffer = bytes.buffer.slice(
+      bytes.byteOffset,
+      bytes.byteOffset + bytes.byteLength,
+    );
+    const geometry = new PLYLoader().parse(buffer);
+    geometry.computeVertexNormals();
+    const color = (DISPLAY_COLORS[entry.radioMaterial] || "0.6 0.6 0.6")
+      .split(" ")
+      .map(Number);
+    const material = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(color[0], color[1], color[2]),
+      roughness: 0.82,
+      metalness: 0,
+      side: THREE.DoubleSide,
+    });
+    material.name = entry.radioMaterial;
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = entry.shapeId;
+    mesh.userData = {
+      role: entry.role,
+      planMaterial: entry.planMaterial,
+      radioMaterial: entry.radioMaterial,
+      vertices: entry.vertices,
+      triangles: entry.triangles,
+    };
+    zUpScene.add(mesh);
+  }
+
+  for (const ap of config.accessPoints) {
+    const marker = new THREE.Mesh(
+      new THREE.SphereGeometry(0.12, 12, 8),
+      new THREE.MeshStandardMaterial({
+        color: ap.kind === "wifi" ? "#7c3aed" : "#0891b2",
+        roughness: 0.65,
+      }),
+    );
+    marker.name = ap.name || `${ap.kind} access point`;
+    marker.position.set(...ap.position);
+    marker.userData = { ...ap, marker: true };
+    zUpScene.add(marker);
+  }
+
+  // The source meshes use the ray-tracing export's Z-up axes. glTF viewers
+  // expect Y-up, so rotate the exported root while retaining metre units.
+  zUpScene.rotation.x = -Math.PI / 2;
+  const arrayBuffer = await new GLTFExporter().parseAsync(zUpScene, {
+    binary: true,
+    onlyVisible: true,
+  });
+  return {
+    blob: new Blob([arrayBuffer], { type: "model/gltf-binary" }),
+    config,
+    warnings,
+  };
 }
 
 export function downloadBlob(blob, fileName) {

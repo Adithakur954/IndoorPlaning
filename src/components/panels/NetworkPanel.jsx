@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import Field from "../ui/Field.jsx";
-import { buildSceneZip, downloadBlob } from "../../utils/sceneExport.js";
+import { buildSceneGlb, buildSceneZip, downloadBlob } from "../../utils/sceneExport.js";
 import ApProfileEditor from "../planner/ApProfileEditor.jsx";
 export default function NetworkPanel({
   plan,
@@ -29,6 +29,22 @@ export default function NetworkPanel({
       setExportState({ error: error.message, warnings: error.warnings });
     }
   };
+  const exportSceneGlb = async () => {
+    setExportState({ busy: true });
+    try {
+      const { blob, config, warnings } = await buildSceneGlb(plan, {
+        floorIds: allFloors ? undefined : [plan.selectedFloorId],
+        includeFurniture: furniture,
+      });
+      downloadBlob(blob, "indoor-planner-scene.glb");
+      setExportState({
+        done: `Exported GLB with ${config.floors.length} floor${config.floors.length === 1 ? "" : "s"} (${config.floors.map((floor) => floor.name).join(", ")}), ${config.meshes.length} meshes and ${config.accessPoints.length} access points.`,
+        warnings,
+      });
+    } catch (error) {
+      setExportState({ error: error.message, warnings: error.warnings });
+    }
+  };
   return (
     <div className="panel-grid">
       {optimization && <ApProfileEditor plan={plan} mutate={mutate} optimization={optimization} />}
@@ -37,8 +53,8 @@ export default function NetworkPanel({
         <p>
           Builds the 3D walls, openings and floor slabs shown in the 3D view as
           PLY meshes with a Mitsuba scene file, ITU-R radio materials and the
-          access-point configuration, for a Sionna RT simulation worker. It
-          contains geometry and material assumptions only.
+          access-point configuration, for a Sionna RT simulation worker. Export
+          a GLB as well for general 3D viewers and browser-based tools.
         </p>
         <label>
           <input
@@ -56,9 +72,14 @@ export default function NetworkPanel({
           />{" "}
           Include furniture as wooden boxes
         </label>
-        <button onClick={exportScene} disabled={exportState?.busy}>
-          Export scene (.zip)
-        </button>
+        <div className="button-row">
+          <button onClick={exportScene} disabled={exportState?.busy}>
+            Export ray-tracing scene (.zip)
+          </button>
+          <button onClick={exportSceneGlb} disabled={exportState?.busy}>
+            Export {allFloors ? "all floors" : "selected floor"} (.glb)
+          </button>
+        </div>
         {exportState?.done && <p>{exportState.done}</p>}
         {exportState?.error && <p className="error">{exportState.error}</p>}
         {exportState?.warnings?.map((w) => (
