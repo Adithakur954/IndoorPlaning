@@ -148,13 +148,6 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
               optionLabels={Object.fromEntries(c.carriers.map((x) => [x.id, carrierLabel(x)]))}
               onChange={cellular.setCarrierId}
             />
-            <Field
-              label="Map"
-              value={cellular.metric}
-              options={["rsrp", "sinr"]}
-              optionLabels={{ rsrp: "RSRP (dBm)", sinr: "SINR (dB)" }}
-              onChange={cellular.setMetric}
-            />
           </div>
         )}
         {cellular.problems.length > 0 && (

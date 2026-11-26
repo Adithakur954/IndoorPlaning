@@ -29,7 +29,17 @@ export default function CellularLegend({ cellular, floorId }) {
       {open && (
         <div className="map-legend-body">
           <section>
-            <h4>{cellular.metric === "sinr" ? "SINR (best cell)" : "RSRP (best cell)"}</h4>
+            <h4>KPI</h4>
+            {/* one run gives both maps: the KPI only chooses which one is shown, as in Wi-Fi */}
+            <select
+              className="map-legend-kpi"
+              aria-label="KPI shown on the map"
+              value={cellular.metric}
+              onChange={(e) => cellular.setMetric(e.target.value)}
+            >
+              <option value="rsrp">RSRP (dBm), best cell</option>
+              <option value="sinr">SINR (dB), best cell</option>
+            </select>
             {carrier && (
               <small className="hint">
                 {carrierLabel(carrier)}
