@@ -66,6 +66,9 @@ test("legacy migration preserves complete plans and runs exactly once, even afte
       updatedAt: item.updatedAt,
       floorCount: 1,
       roomCount: 0,
+      projectType: null,
+      wifiCount: 0,
+      cellularCount: 0,
     },
   ]);
   const db = f.inspect();

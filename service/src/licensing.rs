@@ -145,7 +145,7 @@ fn validate_local_license(
     Ok(())
 }
 
-async fn check(projects_file: &Path) -> Result<(), String> {
+async fn check(projects_file: &Path) -> Result<Value, String> {
     // The release public key is pinned; no server or Internet request is used.
     let raw = if cfg!(debug_assertions) {
         tokio::fs::read_to_string(
@@ -189,7 +189,34 @@ async fn check(projects_file: &Path) -> Result<(), String> {
         .as_millis()
         .try_into()
         .map_err(|_| "invalid computer date")?;
-    validate_local_license(&grant, &license_id, machine, activated_at, current_time)
+    validate_local_license(&grant, &license_id, machine, activated_at, current_time)?;
+    Ok(grant)
+}
+
+/// Modules a grant unlocks. A grant without a feature list is a Wi-Fi license
+/// (keys issued before features existed), as in licensing/protocol.js.
+pub fn grant_features(grant: &Value) -> Vec<String> {
+    match grant["features"].as_array() {
+        None => vec!["wifi".to_string()],
+        Some(list) => list
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect(),
+    }
+}
+
+fn development_mode() -> bool {
+    cfg!(debug_assertions) && std::env::var("INDOOR_LICENSE_MODE").as_deref() == Ok("development")
+}
+
+/// Whether the active license includes a separately sold module (e.g. "cellular").
+pub async fn feature_allowed(state: &Shared, name: &str) -> bool {
+    if development_mode() {
+        return true;
+    }
+    check(&state.cfg.projects_file)
+        .await
+        .is_ok_and(|grant| grant_features(&grant).iter().any(|f| f == name))
 }
 
 #[cfg(test)]
@@ -214,6 +241,19 @@ mod tests {
         assert!(machine_matches("EC57-B4B2-339D-B17E", &full));
         assert!(machine_matches(&full, &full));
         assert!(!machine_matches("EC57-B4B2-339D-B17F", &full));
+    }
+
+    #[test]
+    fn a_grant_without_features_is_wifi_only() {
+        assert_eq!(grant_features(&json!({})), vec!["wifi"]);
+        assert_eq!(
+            grant_features(&json!({"features": ["wifi", "cellular"]})),
+            vec!["wifi", "cellular"]
+        );
+        assert_eq!(
+            grant_features(&json!({"features": ["cellular"]})),
+            vec!["cellular"]
+        );
     }
 
     #[test]
@@ -253,13 +293,11 @@ pub async fn require_license(
         return next.run(request).await;
     }
     // Explicit source-development switch. Never set this in a distributed build.
-    if cfg!(debug_assertions)
-        && std::env::var("INDOOR_LICENSE_MODE").as_deref() == Ok("development")
-    {
+    if development_mode() {
         return next.run(request).await;
     }
     match check(&state.cfg.projects_file).await {
-        Ok(()) => next.run(request).await,
+        Ok(_) => next.run(request).await,
         Err(_) => (StatusCode::PAYMENT_REQUIRED, Json(json!({ "code": "LICENSE_REQUIRED", "error": "An active offline license is required. Open the app to activate or check the computer date." }))).into_response(),
     }
 }

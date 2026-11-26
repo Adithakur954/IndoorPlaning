@@ -310,6 +310,95 @@ small {
 .project-card h3 {
   font-size: 20px;
 }
+.card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.project-kind {
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.project-kind.wifi {
+  background: #e6f4ef;
+  color: #0d7662;
+}
+.project-kind.cellular {
+  background: #e8eefb;
+  color: #2a4fa8;
+}
+.dialog-field + .dialog-field {
+  margin-top: 16px;
+}
+.dialog-hint {
+  font-weight: 400;
+  color: #5f736c;
+  font-size: 12px;
+}
+.workspace-switch {
+  display: inline-flex;
+  border: 1px solid #dce7e2;
+  border-radius: 999px;
+  padding: 3px;
+  background: #fff;
+}
+.workspace-switch button {
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 14px;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  color: #5f736c;
+}
+.workspace-switch button.active {
+  background: #0d7662;
+  color: #fff;
+}
+.workspace-choice {
+  text-align: center;
+}
+.workspace-choice h1 {
+  margin: 8px 0 28px;
+}
+.workspace-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 320px));
+  justify-content: center;
+  gap: 20px;
+}
+.workspace-option {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding: 26px;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #dce7e2;
+  border-radius: 14px;
+  box-shadow: 0 5px 20px #164a3d09;
+  cursor: pointer;
+}
+.workspace-option:hover {
+  border-color: #0d7662;
+}
+.workspace-option strong {
+  font-size: 20px;
+}
+.workspace-option small {
+  color: #5f736c;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 22px;
+}
 .project-card p {
   margin: 6px 0;
 }

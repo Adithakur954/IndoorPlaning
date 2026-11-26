@@ -1,0 +1,99 @@
+{
+  "about": "Sample antenna catalogue for the cellular (IBS/DAS) module, typed from Frog Cellsat FROG-IBS datasheets (received 2026-11-25). Import it in the editor: Cellular > Antenna models > Import catalogue. The Ultra Slim omni datasheets give no vertical beamwidth, so they are not listed; add them when the vendor gives it or a .msi pattern file.",
+  "antennas": [
+    {
+      "id": "frog-FR-AOF0740-25-NF-1C-IS",
+      "name": "Frog Omni SISO",
+      "vendor": "Frog Cellsat",
+      "model": "FR-AO(F)0740-25-NF-1C-IS",
+      "type": "omni",
+      "polarization": "Horizontal (datasheet)",
+      "maxPowerW": 50,
+      "source": "Frog Omni Antenna SISO datasheet",
+      "bands": [
+        { "fromMHz": 698, "toMHz": 960, "gainDbi": 2.5, "hBeamwidthDeg": 360, "vBeamwidthDeg": 116 },
+        { "fromMHz": 1425, "toMHz": 1710, "gainDbi": 3.5, "hBeamwidthDeg": 360, "vBeamwidthDeg": 90 },
+        { "fromMHz": 1710, "toMHz": 2170, "gainDbi": 4.0, "hBeamwidthDeg": 360, "vBeamwidthDeg": 78 },
+        { "fromMHz": 2170, "toMHz": 2700, "gainDbi": 5.0, "hBeamwidthDeg": 360, "vBeamwidthDeg": 70 },
+        { "fromMHz": 3300, "toMHz": 3800, "gainDbi": 4.0, "hBeamwidthDeg": 360, "vBeamwidthDeg": 65 }
+      ]
+    },
+    {
+      "id": "frog-FR-AP0740-58-NF-1C-IS",
+      "name": "Frog Panel SISO",
+      "vendor": "Frog Cellsat",
+      "model": "FR-AP0740-58-NF-1C-IS",
+      "type": "panel",
+      "polarization": "Vertical",
+      "maxPowerW": 50,
+      "source": "Frog Panel Antenna SISO datasheet",
+      "bands": [
+        { "fromMHz": 698, "toMHz": 806, "gainDbi": 5.5, "hBeamwidthDeg": 100, "vBeamwidthDeg": 90, "frontToBackDb": 9 },
+        { "fromMHz": 806, "toMHz": 960, "gainDbi": 6.5, "hBeamwidthDeg": 85, "vBeamwidthDeg": 82, "frontToBackDb": 10 },
+        { "fromMHz": 1710, "toMHz": 2700, "gainDbi": 8.0, "hBeamwidthDeg": 65, "vBeamwidthDeg": 60, "frontToBackDb": 15 },
+        { "fromMHz": 3300, "toMHz": 3800, "gainDbi": 7.0, "hBeamwidthDeg": 50, "vBeamwidthDeg": 45, "frontToBackDb": 11 }
+      ]
+    },
+    {
+      "id": "frog-FR-AP0740-14-NF-2C-OS",
+      "name": "Frog High Gain Panel SISO",
+      "vendor": "Frog Cellsat",
+      "model": "FR-AP0740-14-NF-2C-OS",
+      "type": "panel",
+      "polarization": "±45°",
+      "maxPowerW": 100,
+      "source": "Frog High Gain Panel Antenna SISO datasheet",
+      "bands": [
+        { "fromMHz": 698, "toMHz": 960, "gainDbi": 12, "hBeamwidthDeg": 75, "vBeamwidthDeg": 21, "frontToBackDb": 20 },
+        { "fromMHz": 1710, "toMHz": 2700, "gainDbi": 14, "hBeamwidthDeg": 68, "vBeamwidthDeg": 17, "frontToBackDb": 20 },
+        { "fromMHz": 3300, "toMHz": 3800, "gainDbi": 14, "hBeamwidthDeg": 68, "vBeamwidthDeg": 17, "frontToBackDb": 23 }
+      ]
+    },
+    {
+      "id": "frog-FR-AO0740-25-NF-1J-IM",
+      "name": "Frog Omni MIMO (one port)",
+      "vendor": "Frog Cellsat",
+      "model": "FR-AO0740-25-NF-1J-IM",
+      "type": "omni",
+      "polarization": "Horizontal (datasheet)",
+      "maxPowerW": 50,
+      "source": "Frog Omni Antenna MIMO datasheet; one port is modelled",
+      "bands": [
+        { "fromMHz": 698, "toMHz": 806, "gainDbi": 2.5, "hBeamwidthDeg": 360, "vBeamwidthDeg": 95 },
+        { "fromMHz": 806, "toMHz": 960, "gainDbi": 3.5, "hBeamwidthDeg": 360, "vBeamwidthDeg": 90 },
+        { "fromMHz": 1710, "toMHz": 2700, "gainDbi": 4.5, "hBeamwidthDeg": 360, "vBeamwidthDeg": 46 },
+        { "fromMHz": 3300, "toMHz": 4000, "gainDbi": 5.0, "hBeamwidthDeg": 360, "vBeamwidthDeg": 38 }
+      ]
+    },
+    {
+      "id": "frog-FR-AP0740-58-NF-1C-IM",
+      "name": "Frog Panel MIMO (one port)",
+      "vendor": "Frog Cellsat",
+      "model": "FR-AP0740-58-NF-1C-IM",
+      "type": "panel",
+      "polarization": "Horizontal and Vertical",
+      "maxPowerW": 50,
+      "source": "Frog Panel Antenna MIMO datasheet; one port is modelled",
+      "bands": [
+        { "fromMHz": 698, "toMHz": 960, "gainDbi": 5.5, "hBeamwidthDeg": 90, "vBeamwidthDeg": 78, "frontToBackDb": 7 },
+        { "fromMHz": 1710, "toMHz": 2700, "gainDbi": 8.5, "hBeamwidthDeg": 65, "vBeamwidthDeg": 60, "frontToBackDb": 13 },
+        { "fromMHz": 3300, "toMHz": 4000, "gainDbi": 7.0, "hBeamwidthDeg": 45, "vBeamwidthDeg": 38, "frontToBackDb": 10 }
+      ]
+    },
+    {
+      "id": "frog-FR-AP0740-14-NF-1C-OM",
+      "name": "Frog High Gain Panel MIMO (one port)",
+      "vendor": "Frog Cellsat",
+      "model": "FR-AP0740-14-NF-1C-OM",
+      "type": "panel",
+      "polarization": "±45°",
+      "maxPowerW": 100,
+      "source": "Frog High Gain Panel Antenna MIMO datasheet; one port is modelled",
+      "bands": [
+        { "fromMHz": 698, "toMHz": 960, "gainDbi": 12, "hBeamwidthDeg": 75, "vBeamwidthDeg": 21, "frontToBackDb": 20 },
+        { "fromMHz": 1710, "toMHz": 2700, "gainDbi": 14, "hBeamwidthDeg": 68, "vBeamwidthDeg": 17, "frontToBackDb": 20 },
+        { "fromMHz": 3300, "toMHz": 3800, "gainDbi": 14, "hBeamwidthDeg": 68, "vBeamwidthDeg": 17, "frontToBackDb": 23 }
+      ]
+    }
+  ]
+}

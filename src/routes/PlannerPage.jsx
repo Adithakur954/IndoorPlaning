@@ -74,6 +74,9 @@ import {
   networkKindOf,
 } from "../utils/indoorLogKpis.js";
 import { DEFAULT_LEGEND_SECTIONS } from "../components/planner/MapLegend.jsx";
+import { useCellularPrediction } from "../hooks/useCellularPrediction.js";
+import { newAntennaFields } from "../infra/cellular/model.js";
+import { WORKSPACES, useWorkspace, workspaceOf } from "../workspace.js";
 import PropertyMenu from "../components/planner/PropertyMenu.jsx";
 import WorkspaceFooter from "../components/planner/WorkspaceFooter.jsx";
 import { MeasurementUnitProvider } from "../utils/measurementUnits.jsx";
@@ -154,13 +157,18 @@ const findRoomWallPlacement = (rooms, point, openingWidth, tolerance) => {
 export default function PlannerPage() {
   const { projectId, section } = useParams();
   const navigate = useNavigate();
-  const tab = ["design", "network", "data", "alignment", "cabling", "capacity"].includes(section)
-    ? section
-    : "design";
-  const setTab = (value) => navigate(`/projects/${projectId}/${value}`);
   const [project, setProject] = useState(null),
-    [plan, setPlan] = useState(initialPlan),
-    [projectName, setProjectName] = useState(""),
+    [plan, setPlan] = useState(initialPlan);
+  // Wi-Fi and cellular projects are separate workspaces; cabling and
+  // capacity are Wi-Fi tools.
+  const workspace = workspaceOf(plan);
+  const license = useWorkspace();
+  const tabs = workspace === "cellular"
+    ? ["design", "network", "data", "alignment"]
+    : ["design", "network", "data", "alignment", "cabling", "capacity"];
+  const tab = tabs.includes(section) ? section : "design";
+  const setTab = (value) => navigate(`/projects/${projectId}/${value}`);
+  const [projectName, setProjectName] = useState(""),
     [view, setView] = useState("2d"),
     [tool, setTool] = useState("select"),
     [selected, setSelected] = useState(null),
@@ -450,6 +458,11 @@ export default function PlannerPage() {
     showOnMap: () => setMapMode("prediction"),
     weakBelowDbm,
   });
+  const cellular = useCellularPrediction({
+    plan,
+    mutate,
+    showOnMap: () => setPanelMode("cellular"),
+  });
   const optimization = useApOptimization({
     plan, mutate, setHeatmap,
     noiseSettings: prediction.rtSettings,
@@ -481,6 +494,7 @@ export default function PlannerPage() {
     ],
   );
   const predictions = useMemo(() => {
+      if (workspace === "cellular") return cellular.show ? cellular.cellsFor(floorId) : [];
       const optCells = optOnMap ? optimization.heatCells(floorId, {
         metric: predictionMetric,
         snrThreshold: Number(predictionRanges[0]?.max ?? 10),
@@ -530,6 +544,14 @@ export default function PlannerPage() {
       heatRanges,
       optThreshold,
       prediction.noApsLeft,
+      workspace,
+      // the cellular map changes with its run, carrier, metric and targets
+      cellular.show,
+      cellular.result,
+      cellular.carrierId,
+      cellular.metric,
+      cellular.ranges,
+      cellular.threshold,
     ]),
     warnings = useMemo(() => overlapWarnings(rooms), [rooms]),
     nestedNotes = useMemo(() => nestedRoomNotes(rooms), [rooms]),
@@ -889,7 +911,10 @@ export default function PlannerPage() {
       setTool("select");
     }
     if (kind === "cellular" || kind === "wifi") {
-      const s = defaultSource(kind, p, floorId, plan.rf);
+      const s = {
+        ...defaultSource(kind, p, floorId, plan.rf),
+        ...(kind === "cellular" ? newAntennaFields(plan) : {}),
+      };
       mutate((old) => ({ ...old, sources: [...old.sources, s] }));
       selectEntity({ type: "source", id: s.id });
     }
@@ -1813,9 +1838,19 @@ Cancel: ${what} of the optimised design instead.`,
     setSelectedFloor,
     // Each map has its own visibility: the optimiser's (B) follows its After / Before / Hide choice and its band,
     // and shows as soon as a result is there; the prediction's (A) follows its own Hide / Show heatmap switch.
-    heatmap: optOnMap ? Boolean(optimization.opt) && optimization.show !== "off" : heatmap,
+    heatmap:
+      workspace === "cellular"
+        ? cellular.show && cellular.hasResult
+        : optOnMap
+          ? Boolean(optimization.opt) && optimization.show !== "off"
+          : heatmap,
     // an out-of-date prediction is shown faded until the new one is in
-    heatmapOpacity: prediction.stale && mapMode !== "optimise" ? heatmapOpacity * 0.45 : heatmapOpacity,
+    heatmapOpacity:
+      (workspace === "cellular" ? cellular.stale : prediction.stale && mapMode !== "optimise")
+        ? heatmapOpacity * 0.45
+        : heatmapOpacity,
+    workspace,
+    cellular,
     logsVisible,
     logGrid,
     metric,
@@ -1875,6 +1910,18 @@ Cancel: ${what} of the optimised design instead.`,
   };
   if (!project)
     return <div className="empty">{message || "Loading project..."}</div>;
+  if (license.ready && !license.licensed.includes(workspace))
+    return (
+      <div className="empty">
+        <p>
+          “{projectName}” is a {WORKSPACES[workspace].label} project. Your license does not include
+          the {WORKSPACES[workspace].label} module.
+        </p>
+        <button className="primary" onClick={() => navigate("/")}>
+          Back to projects
+        </button>
+      </div>
+    );
   return (
     <MeasurementUnitProvider unit={measurementUnit}>
     <div className="app">
@@ -1906,7 +1953,9 @@ Cancel: ${what} of the optimised design instead.`,
               aria-label="Project name"
             />
           </div>
-          <div className="sidebar-heading">WORKSPACE</div>
+          <div className="sidebar-heading">
+            {WORKSPACES[workspace].label.toUpperCase()} WORKSPACE
+          </div>
           <nav>
             {[
               ["design", "▦", "Editor"],
@@ -1915,7 +1964,7 @@ Cancel: ${what} of the optimised design instead.`,
               ["alignment", "⌖", "Geo alignment"],
               ["cabling", "⌇", "Cabling"],
               ["capacity", "▤", "Capacity"],
-            ].map(([id, icon, label]) => (
+            ].filter(([id]) => tabs.includes(id)).map(([id, icon, label]) => (
               <button
                 key={id}
                 className={tab === id ? "active" : ""}
@@ -2032,14 +2081,25 @@ Cancel: ${what} of the optimised design instead.`,
                 active={panelMode === "property"}
                 onOpen={() => openRightPanel("property")}
               />
-              <PredictionMenu
-                active={panelMode === "prediction" || panelMode === "optimize"}
-                onOpen={() =>
-                  openRightPanel(
-                    panelMode === "optimize" ? "optimize" : "prediction",
-                  )
-                }
-              />
+              {workspace === "cellular" ? (
+                <button
+                  className="prediction-menu-trigger"
+                  type="button"
+                  aria-pressed={panelMode === "cellular"}
+                  onClick={() => openRightPanel("cellular")}
+                >
+                  Cellular
+                </button>
+              ) : (
+                <PredictionMenu
+                  active={panelMode === "prediction" || panelMode === "optimize"}
+                  onOpen={() =>
+                    openRightPanel(
+                      panelMode === "optimize" ? "optimize" : "prediction",
+                    )
+                  }
+                />
+              )}
               <label
                 className="prediction-opacity"
                 title="Opacity of the prediction image"
@@ -2102,25 +2162,27 @@ Cancel: ${what} of the optimised design instead.`,
                   },
                   {
                     id: "wn",
-                    label: "Wi-Fi / cellular names",
+                    label: workspace === "cellular" ? "Antenna names" : "Wi-Fi AP names",
                     checked: showWifiNames,
                     onChange: setShowWifiNames,
                     defaultOn: true,
                   },
-                  {
+                  workspace === "wifi" && {
                     id: "cables",
                     label: "Cables (Wi-Fi cabling)",
                     checked: showCables,
                     onChange: setShowCables,
                     defaultOn: false,
                   },
-                ]}
+                ].filter(Boolean)}
               />
               <LegendMenu
                 sections={legendSections}
                 onChange={setLegendSections}
               />
               <DownloadImageButton onDownload={downloadPlot} busy={imageBusy} />
+              {/* Wi-Fi reports (per AP, 2.4 vs 5 GHz); the cellular report is its own step */}
+              {workspace === "wifi" && (<>
               <button
                 className="download-image-trigger icon-button"
                 type="button"
@@ -2177,6 +2239,7 @@ Cancel: ${what} of the optimised design instead.`,
                   <path d="M9 18v-4M12 18v-7M15 18v-5" />
                 </svg>
               </button>
+              </>)}
             </header>
           )}
           <main className={`main ${tab === "design" ? "main-editor" : ""}`}>

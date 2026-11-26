@@ -16,6 +16,7 @@ export default defineConfig({
       "/api/cache": `http://127.0.0.1:${process.env.SIM_PORT || 3002}`,
       "/api/maintenance": `http://127.0.0.1:${process.env.SIM_PORT || 3002}`,
       "/api/capacity": `http://127.0.0.1:${process.env.SIM_PORT || 3002}`,
+      "/api/cellular": `http://127.0.0.1:${process.env.SIM_PORT || 3002}`,
       "/api": `http://127.0.0.1:${process.env.API_PORT || 3001}`,
     },
   },

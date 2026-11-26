@@ -12,8 +12,8 @@ const toolLabels = {
   door: "Door",
   window: "Window",
   furniture: "Furniture",
-  cellular: "Cellular",
-  wifi: "Wi-Fi",
+  cellular: "Antenna",
+  wifi: "Wi-Fi AP",
 };
 
 export default function EditorMenu({ active, onOpen }) {
@@ -62,12 +62,15 @@ export function EditorToolOptions({
   setTool,
   snap,
   setSnap,
+  workspace = "wifi",
 }) {
+  // a project places only its own network: APs in Wi-Fi, antennas in cellular
+  const hidden = workspace === "cellular" ? "wifi" : "cellular";
   return (
     <>
       <div className="popover-label">DRAW TOOLS</div>
       <div className="editor-tool-grid">
-        {Object.entries(toolLabels).map(([value, label]) => (
+        {Object.entries(toolLabels).filter(([value]) => value !== hidden).map(([value, label]) => (
           <button
             key={value}
             type="button"

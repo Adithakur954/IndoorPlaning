@@ -83,3 +83,11 @@ docs/*.pdf
 
 # Generated floor-plan pipeline output (inputs in worker/samples stay tracked)
 worker/samples/floorplan/output_*/
+
+# Client project material (designs, reports, BOQs, drawings, photos): local
+# test cases only, never in git
+ravindar/
+clients/
+*.pdf
+# Local app data and its backups (projects, licenses)
+data/

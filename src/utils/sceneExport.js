@@ -199,7 +199,17 @@ export async function buildSceneFiles(plan, options = {}) {
     includeFurniture = false,
     receiverHeightM = 1.5,
     slabThicknessM = 0.2,
+    // which transmitters the scene carries: "wifi" (the Wi-Fi prediction and
+    // optimiser), "cellular" (cellular antennas only) or "none" (the building
+    // only, as the cellular prediction sends its antennas in the job instead)
+    sources = "wifi",
   } = options;
+  if (!["wifi", "cellular", "none"].includes(sources))
+    throw new Error(`Unknown scene sources: ${sources}`);
+  const isExported = (s) =>
+    sources === "wifi"
+      ? s.kind !== "cellular"
+      : sources === "cellular" && s.kind === "cellular";
   const wallThicknessM = Number(plan.wallThickness) || 0.2;
   const { overrides: materialOverrides, errors: overrideErrors } =
     sanitizeOverrides(plan.materialOverrides, wallThicknessM);
@@ -406,7 +416,7 @@ export async function buildSceneFiles(plan, options = {}) {
   const elevation = new Map(floors.map((f) => [f.id, f.elevation]));
   const elevationOf = elevation;
   const accessPoints = plan.sources
-    .filter((s) => elevation.has(s.floorId))
+    .filter((s) => isExported(s) && elevation.has(s.floorId))
     .map((s) => {
       const y = elevation.get(s.floorId) + Number(s.heightM || 2);
       return {
@@ -431,7 +441,7 @@ export async function buildSceneFiles(plan, options = {}) {
         beamwidthDeg: Number(s.beamwidthDeg ?? 120),
       };
     });
-  if (!accessPoints.length)
+  if (!accessPoints.length && sources === "wifi")
     warnings.push(
       "No access points on the exported floors; only geometry was exported.",
     );

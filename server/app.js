@@ -5,11 +5,17 @@ import { distDir } from "./config/paths.js";
 import { projectRouter } from "./routes/projects.js";
 import { sessionRouter } from "./routes/sessions.js";
 import { floorplanRouter } from "./routes/floorplan.js";
-import { licenseRouter, requireLicense } from "./licensing/index.js";
+import {
+  licenseRouter,
+  requireFeature,
+  requireLicense,
+} from "./licensing/index.js";
 import { desktopSimulationProxy, simulationRoutes } from "./desktopProxy.js";
 
 export const app = express();
 app.use(simulationRoutes, desktopSimulationProxy);
+// The cellular module is sold separately: checked here and again by the service.
+app.use("/api/cellular", requireFeature("cellular"), desktopSimulationProxy);
 app.use(express.json({ limit: "120mb" }));
 app.get("/api/health", (_req, res) =>
   res.json({ ok: true, service: "indoor-planner-api", licenseRequired: true }),

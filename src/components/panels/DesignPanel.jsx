@@ -20,6 +20,8 @@ const getPanelMaxWidth = () =>
     Math.max(MIN_PANEL_WIDTH, window.innerWidth - 240 - 360),
   );
 import MapLegend from "../planner/MapLegend.jsx";
+import CellularPanel from "../planner/CellularPanel.jsx";
+import CellularLegend from "../planner/CellularLegend.jsx";
 import PredictionPanel from "../planner/PredictionPanel.jsx";
 import OptimizationPanel from "../planner/OptimizationPanel.jsx";
 import MaterialsEditor from "../planner/MaterialsEditor.jsx";
@@ -117,6 +119,8 @@ export default function DesignPanel({
   draftMethod,
   applyDraft,
   discardDraft,
+  workspace = "wifi",
+  cellular,
 }) {
   const unit = useMeasurementUnit();
   const [panelWidth, setPanelWidthState] = useState(() => {
@@ -201,6 +205,9 @@ export default function DesignPanel({
         style={{ "--panel-width": `${panelWidth}px` }}
       >
         <div className="view-stack">
+          {workspace === "cellular" && cellular?.hasResult && cellular.show ? (
+            <CellularLegend cellular={cellular} />
+          ) : (
           <MapLegend
             optimization={optimization}
             sections={legendSections}
@@ -226,6 +233,7 @@ export default function DesignPanel({
             }
             hasBoundary={(plan.boundaries || []).some((b) => b.floorId === floorId)}
           />
+          )}
           {mapMode === "prediction" && (prediction.busy || prediction.run?.error) && (
             <div
               className={`map-status ${prediction.run?.error ? "error" : ""}`}
@@ -324,6 +332,8 @@ export default function DesignPanel({
               <h3>
                 {panelMode === "tools"
                   ? "Tools"
+                  : panelMode === "cellular"
+                    ? "Cellular (IBS / DAS)"
                   : panelMode === "prediction"
                     ? "Prediction"
                   : panelMode === "optimize"
@@ -373,6 +383,16 @@ export default function DesignPanel({
                 setTool={setTool}
                 snap={snap}
                 setSnap={setSnap}
+                workspace={workspace}
+              />
+            ) : panelMode === "cellular" && workspace === "cellular" ? (
+              <CellularPanel
+                plan={plan}
+                mutate={mutate}
+                cellular={cellular}
+                floorId={floorId}
+                selectedSource={selected?.type === "source" ? obj : null}
+                setTool={setTool}
               />
             ) : panelMode === "optimize" ? (
               <OptimizationPanel
@@ -527,7 +547,7 @@ export default function DesignPanel({
                                 : key === "antennaPattern"
                                   ? ["omni", "directional"]
                                   : key === "kind"
-                                    ? ["cellular", "wifi"]
+                                    ? [workspace] // a project holds one network
                                     : key === "roomId"
                                       ? rooms.map((r) => r.id)
                                       : null

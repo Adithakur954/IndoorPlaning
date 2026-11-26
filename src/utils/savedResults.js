@@ -4,8 +4,9 @@
 // reference and the service's files for the old one.
 import { deleteJob } from "../services/maintenance.js";
 
-// Everything about the plan that changes a simulation. A saved result whose
-// fingerprint differs from the current plan is out of date.
+// Everything about the plan that changes a Wi-Fi simulation. A saved result
+// whose fingerprint differs from the current plan is out of date. Cellular
+// antennas are not part of it: they are not in the Wi-Fi scene.
 export const planStamp = (plan) =>
   JSON.stringify([
     plan.floors,
@@ -14,7 +15,7 @@ export const planStamp = (plan) =>
     plan.doors,
     plan.windows,
     plan.interiorWalls,
-    plan.sources,
+    (plan.sources || []).filter((s) => s.kind !== "cellular"),
     plan.wallTypes,
     plan.wallThickness,
     plan.materialOverrides,

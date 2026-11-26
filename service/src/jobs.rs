@@ -24,7 +24,6 @@ pub struct Config {
     pub projects_file: PathBuf,
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Phase {
@@ -47,6 +46,8 @@ pub struct AppState {
     pub cancels: Mutex<HashMap<String, Arc<Notify>>>,
     /// (worker files key, model version) from the last time it was asked
     pub model: Mutex<Option<(String, String)>>,
+    /// the same for the cellular worker (its own model version)
+    pub cellular_model: Mutex<Option<(String, String)>>,
     pub queue: mpsc::UnboundedSender<String>,
 }
 
@@ -69,6 +70,7 @@ pub fn new_state(cfg: Config) -> (Shared, mpsc::UnboundedReceiver<String>) {
             jobs: Mutex::new(HashMap::new()),
             cancels: Mutex::new(HashMap::new()),
             model: Mutex::new(None),
+            cellular_model: Mutex::new(None),
             queue,
         }),
         rx,
@@ -86,18 +88,30 @@ pub fn spawn_runners(state: Shared, rx: mpsc::UnboundedReceiver<String>) {
                 let next = rx.lock().await.recv().await;
                 let Some(id) = next else { break };
                 // cancelled while it was still waiting in the queue
-                if state.jobs.lock().await.get(&id).is_some_and(|j| j.phase == Phase::Cancelled) {
+                if state
+                    .jobs
+                    .lock()
+                    .await
+                    .get(&id)
+                    .is_some_and(|j| j.phase == Phase::Cancelled)
+                {
                     continue;
                 }
                 let cancel = Arc::new(Notify::new());
-                state.cancels.lock().await.insert(id.clone(), cancel.clone());
+                state
+                    .cancels
+                    .lock()
+                    .await
+                    .insert(id.clone(), cancel.clone());
                 set(&state, &id, Phase::Running, None).await;
                 let outcome = run_worker(&state.cfg, &id, cancel).await;
                 state.cancels.lock().await.remove(&id);
                 match outcome {
                     Ok(()) => set(&state, &id, Phase::Done, None).await,
                     Err(WorkerEnd::Cancelled) => set(&state, &id, Phase::Cancelled, None).await,
-                    Err(WorkerEnd::Failed(error)) => set(&state, &id, Phase::Failed, Some(error)).await,
+                    Err(WorkerEnd::Failed(error)) => {
+                        set(&state, &id, Phase::Failed, Some(error)).await
+                    }
                 }
             }
         });
@@ -105,7 +119,11 @@ pub fn spawn_runners(state: Shared, rx: mpsc::UnboundedReceiver<String>) {
 }
 
 pub async fn set(state: &Shared, id: &str, phase: Phase, error: Option<String>) {
-    state.jobs.lock().await.insert(id.to_string(), JobStatus { phase, error });
+    state
+        .jobs
+        .lock()
+        .await
+        .insert(id.to_string(), JobStatus { phase, error });
 }
 
 /// Asks a queued or running job to stop. Returns false when it is not active.
@@ -127,7 +145,13 @@ pub async fn cancel(state: &Shared, id: &str) -> bool {
 }
 
 pub async fn queued_count(state: &Shared) -> usize {
-    state.jobs.lock().await.values().filter(|j| j.phase == Phase::Queued).count()
+    state
+        .jobs
+        .lock()
+        .await
+        .values()
+        .filter(|j| j.phase == Phase::Queued)
+        .count()
 }
 
 pub enum WorkerEnd {
@@ -141,14 +165,28 @@ impl From<String> for WorkerEnd {
     }
 }
 
+/// The Python package that runs a job: cellular jobs have their own worker,
+/// Wi-Fi predictions and optimisations use the Sionna worker.
+pub fn worker_module(job: &serde_json::Value) -> &'static str {
+    if job["mode"] == "cellular" {
+        "cellular_worker"
+    } else {
+        "sionna_worker"
+    }
+}
+
 async fn run_worker(cfg: &Config, id: &str, cancel: Arc<Notify>) -> Result<(), WorkerEnd> {
     let job_dir = cfg.job_dir(id);
     let job_file = std::fs::canonicalize(job_dir.join("job.json")).map_err(|e| e.to_string())?;
+    let module = std::fs::read(&job_file)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        .map_or("sionna_worker", |job| worker_module(&job));
     let mut command = Command::new(&cfg.python);
     #[cfg(windows)]
     command.creation_flags(0x08000000);
     let child = command
-        .args(["-m", "sionna_worker"])
+        .args(["-m", module])
         .arg(&job_file)
         .current_dir(&cfg.worker_dir)
         .stdin(Stdio::null())
@@ -176,6 +214,16 @@ async fn run_worker(cfg: &Config, id: &str, cancel: Arc<Notify>) -> Result<(), W
         }
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let tail: String = stderr.chars().rev().take(500).collect::<Vec<_>>().into_iter().rev().collect();
-    Err(WorkerEnd::Failed(format!("worker exited with {}: {tail}", output.status)))
+    let tail: String = stderr
+        .chars()
+        .rev()
+        .take(500)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    Err(WorkerEnd::Failed(format!(
+        "worker exited with {}: {tail}",
+        output.status
+    )))
 }

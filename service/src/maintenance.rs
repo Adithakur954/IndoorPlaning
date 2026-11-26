@@ -10,19 +10,29 @@ use crate::jobs::{Config, Shared};
 /// Cheap fingerprint of the worker's source files (names, sizes, mtimes). When
 /// it changes the real model version is asked from the worker again.
 pub fn worker_files_key(worker_dir: &Path) -> String {
+    files_key(worker_dir, &["sionna_worker"])
+}
+
+fn files_key(worker_dir: &Path, packages: &[&str]) -> String {
     let mut parts = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(worker_dir.join("sionna_worker")) {
-        for e in entries.flatten() {
-            let path = e.path();
-            if path.extension().is_some_and(|x| x == "py") {
-                if let Ok(m) = e.metadata() {
-                    let t = m.modified().ok().and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok());
-                    parts.push(format!(
-                        "{}:{}:{}",
-                        path.file_name().unwrap().to_string_lossy(),
-                        m.len(),
-                        t.map_or(0, |d| d.as_nanos())
-                    ));
+    for package in packages {
+        if let Ok(entries) = std::fs::read_dir(worker_dir.join(package)) {
+            for e in entries.flatten() {
+                let path = e.path();
+                if path.extension().is_some_and(|x| x == "py") {
+                    if let Ok(m) = e.metadata() {
+                        let t = m
+                            .modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok());
+                        parts.push(format!(
+                            "{}/{}:{}:{}",
+                            package,
+                            path.file_name().unwrap().to_string_lossy(),
+                            m.len(),
+                            t.map_or(0, |d| d.as_nanos())
+                        ));
+                    }
                 }
             }
         }
@@ -35,8 +45,24 @@ pub fn worker_files_key(worker_dir: &Path) -> String {
 /// A result or cached row is only reused when this is unchanged.
 pub async fn model_version(state: &Shared) -> Result<String, String> {
     let key = worker_files_key(&state.cfg.worker_dir);
+    worker_version(state, "sionna_worker", key, &state.model).await
+}
+
+/// Model version of the cellular worker: its own code plus the Sionna worker
+/// code it shares, so a cellular change never invalidates Wi-Fi results.
+pub async fn cellular_model_version(state: &Shared) -> Result<String, String> {
+    let key = files_key(&state.cfg.worker_dir, &["cellular_worker", "sionna_worker"]);
+    worker_version(state, "cellular_worker", key, &state.cellular_model).await
+}
+
+async fn worker_version(
+    state: &Shared,
+    module: &str,
+    key: String,
+    cache: &tokio::sync::Mutex<Option<(String, String)>>,
+) -> Result<String, String> {
     {
-        let cached = state.model.lock().await;
+        let cached = cache.lock().await;
         if let Some((k, v)) = cached.as_ref() {
             if *k == key {
                 return Ok(v.clone());
@@ -47,22 +73,32 @@ pub async fn model_version(state: &Shared) -> Result<String, String> {
     #[cfg(windows)]
     command.creation_flags(0x08000000);
     let output = command
-        .args(["-m", "sionna_worker", "--model-version"])
+        .args(["-m", module, "--model-version"])
         .current_dir(&state.cfg.worker_dir)
         .output()
         .await
-        .map_err(|e| format!("could not start the worker to read its version ({}): {e}", state.cfg.python.display()))?;
+        .map_err(|e| {
+            format!(
+                "could not start the worker to read its version ({}): {e}",
+                state.cfg.python.display()
+            )
+        })?;
     let text = String::from_utf8_lossy(&output.stdout);
     let info: serde_json::Value = text
         .lines()
         .rev()
         .find_map(|l| serde_json::from_str(l).ok())
-        .ok_or_else(|| format!("the worker did not report a model version: {}", String::from_utf8_lossy(&output.stderr)))?;
+        .ok_or_else(|| {
+            format!(
+                "the worker did not report a model version: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )
+        })?;
     let version = info["modelVersion"]
         .as_str()
         .ok_or("the worker's model version is missing")?
         .to_string();
-    *state.model.lock().await = Some((key, version.clone()));
+    *cache.lock().await = Some((key, version.clone()));
     Ok(version)
 }
 
@@ -71,29 +107,46 @@ pub fn referenced_job_ids(projects_file: &Path) -> Result<HashSet<String>, Strin
     // Prefer SQLite once migrated. Never fall back to stale JSON on a DB error.
     let database = projects_file.with_file_name("projects.sqlite");
     if database.exists() {
-        let db = rusqlite::Connection::open_with_flags(&database, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .map_err(|e| format!("cannot read project database: {e}"))?;
-        db.busy_timeout(Duration::from_secs(5)).map_err(|e| e.to_string())?;
-        let imported: bool = db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM storage_metadata WHERE key = 'legacy_json_import')",
-            [], |row| row.get(0),
-        ).map_err(|e| e.to_string())?;
-        if !imported { return Err("project migration has not completed".into()); }
-        let mut statement = db.prepare("SELECT DISTINCT job_id FROM simulation_runs")
+        let db = rusqlite::Connection::open_with_flags(
+            &database,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .map_err(|e| format!("cannot read project database: {e}"))?;
+        db.busy_timeout(Duration::from_secs(5))
             .map_err(|e| e.to_string())?;
-        let rows = statement.query_map([], |row| row.get::<_, String>(0))
+        let imported: bool = db
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM storage_metadata WHERE key = 'legacy_json_import')",
+                [],
+                |row| row.get(0),
+            )
             .map_err(|e| e.to_string())?;
-        return rows.collect::<Result<HashSet<_>, _>>().map_err(|e| e.to_string());
+        if !imported {
+            return Err("project migration has not completed".into());
+        }
+        let mut statement = db
+            .prepare("SELECT DISTINCT job_id FROM simulation_runs")
+            .map_err(|e| e.to_string())?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        return rows
+            .collect::<Result<HashSet<_>, _>>()
+            .map_err(|e| e.to_string());
     }
     let mut ids = HashSet::new();
     let text = std::fs::read_to_string(projects_file).map_err(|e| e.to_string())?;
     let value = serde_json::from_str::<serde_json::Value>(&text).map_err(|e| e.to_string())?;
     let projects = value.as_array().or_else(|| value["projects"].as_array());
-    if projects.is_none() { return Err("invalid legacy projects file".into()); }
+    if projects.is_none() {
+        return Err("invalid legacy projects file".into());
+    }
     for project in projects.into_iter().flatten() {
         if let Some(saved) = project["plan"]["savedResults"].as_object() {
             for entry in saved.values() {
-                if let Some(id) = entry.as_str() { ids.insert(id.to_string()); }
+                if let Some(id) = entry.as_str() {
+                    ids.insert(id.to_string());
+                }
                 if let Some(id) = entry["jobId"].as_str() {
                     ids.insert(id.to_string());
                 }
@@ -225,7 +278,10 @@ mod tests {
         )
         .unwrap();
         let ids = referenced_job_ids(&file).unwrap();
-        assert_eq!(ids, HashSet::from(["aaa".to_string(), "bbb".to_string(), "ccc".to_string()]));
+        assert_eq!(
+            ids,
+            HashSet::from(["aaa".to_string(), "bbb".to_string(), "ccc".to_string()])
+        );
         assert!(referenced_job_ids(&dir.join("missing.json")).is_err());
         std::fs::write(&file, "not json").unwrap();
         assert!(referenced_job_ids(&file).is_err());
@@ -235,16 +291,26 @@ mod tests {
     fn sqlite_references_take_precedence_and_errors_prevent_cleanup() {
         let dir = temp("sqlite-refs");
         let legacy = dir.join("projects.json");
-        std::fs::write(&legacy, r#"{"projects":[{"plan":{"savedResults":{"prediction":{"jobId":"stale"}}}}]}"#).unwrap();
+        std::fs::write(
+            &legacy,
+            r#"{"projects":[{"plan":{"savedResults":{"prediction":{"jobId":"stale"}}}}]}"#,
+        )
+        .unwrap();
         let database = dir.join("projects.sqlite");
         let db = rusqlite::Connection::open(&database).unwrap();
-        db.execute_batch("CREATE TABLE storage_metadata(key TEXT PRIMARY KEY, value TEXT);
+        db.execute_batch(
+            "CREATE TABLE storage_metadata(key TEXT PRIMARY KEY, value TEXT);
             CREATE TABLE simulation_runs(project_id TEXT, slot TEXT, job_id TEXT);
             INSERT INTO storage_metadata VALUES ('legacy_json_import', '{}');
             INSERT INTO simulation_runs VALUES ('p1', 'prediction', 'current');
             INSERT INTO simulation_runs VALUES ('p2', 'prediction', 'current');
-            INSERT INTO simulation_runs VALUES ('p1', 'optimization', 'other');").unwrap();
-        assert_eq!(referenced_job_ids(&legacy).unwrap(), HashSet::from(["current".into(), "other".into()]));
+            INSERT INTO simulation_runs VALUES ('p1', 'optimization', 'other');",
+        )
+        .unwrap();
+        assert_eq!(
+            referenced_job_ids(&legacy).unwrap(),
+            HashSet::from(["current".into(), "other".into()])
+        );
         db.execute("DELETE FROM storage_metadata", []).unwrap();
         assert!(referenced_job_ids(&legacy).is_err());
         db.execute_batch("DROP TABLE simulation_runs").unwrap();
@@ -265,7 +331,10 @@ mod tests {
         }
         let referenced = HashSet::from(["keep".to_string()]);
         // too young to delete
-        assert_eq!(cleanup_orphans(&cfg, &referenced, Duration::from_secs(3600)), 0);
+        assert_eq!(
+            cleanup_orphans(&cfg, &referenced, Duration::from_secs(3600)),
+            0
+        );
         assert_eq!(cleanup_orphans(&cfg, &referenced, Duration::ZERO), 2);
         assert!(cfg.job_dir("keep").exists());
         assert!(!cfg.job_dir("orphan").exists());
