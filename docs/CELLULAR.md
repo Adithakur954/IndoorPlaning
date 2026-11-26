@@ -22,7 +22,7 @@ results are not affected by anything in it.
 
 1. Open the **Cellular** workspace (asked on start when the license has both Wi-Fi and cellular;
    with a cellular-only license the app opens there directly) and create or open a Cellular project.
-   Each project is Wi-Fi or Cellular, never both; a new project can copy the building of another.
+   Each project is Wi-Fi or Cellular, never both.
    In the editor, press **Cellular**.
 2. **Antenna models → Import catalogue…**: a vendor catalogue file (JSON, format below). A sample
    typed from the Frog datasheets is in `docs/catalogues/frog-ibs-antennas.json`. Measured

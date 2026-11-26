@@ -6,10 +6,9 @@ import { initialPlan } from "../models/plan.js";
 import {
   createProject,
   deleteProject,
-  getProject,
   listProjects,
 } from "../services/projects.js";
-import { BUILDING_KEYS, WORKSPACES, useWorkspace, workspaceOf } from "../workspace.js";
+import { WORKSPACES, useWorkspace, workspaceOf } from "../workspace.js";
 
 // Crop the logo's empty margins (same crop as the report header).
 const companyLogo = `data:image/svg+xml;utf8,${encodeURIComponent(
@@ -62,9 +61,8 @@ function WorkspaceSwitch({ licensed, workspace, onChoose }) {
   );
 }
 
-function NewProjectDialog({ workspace, projects, onCancel, onCreate }) {
+function NewProjectDialog({ workspace, onCancel, onCreate }) {
   const [name, setName] = useState("New indoor plan");
-  const [copyFrom, setCopyFrom] = useState("");
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onCancel();
     window.addEventListener("keydown", onKey);
@@ -72,7 +70,7 @@ function NewProjectDialog({ workspace, projects, onCancel, onCreate }) {
   }, [onCancel]);
   const submit = (e) => {
     e.preventDefault();
-    if (name.trim()) onCreate(name.trim(), copyFrom || null);
+    if (name.trim()) onCreate(name.trim());
   };
   return (
     <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
@@ -84,23 +82,6 @@ function NewProjectDialog({ workspace, projects, onCancel, onCreate }) {
           Project name
           <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onFocus={(e) => e.target.select()} />
         </label>
-        {projects.length > 0 && (
-          <label className="dialog-field">
-            Floor plan
-            <select value={copyFrom} onChange={(e) => setCopyFrom(e.target.value)}>
-              <option value="">Start blank</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  Copy from “{p.name}” ({WORKSPACES[workspaceOf(p)].label})
-                </option>
-              ))}
-            </select>
-            <small className="dialog-hint">
-              Copies floors, walls, rooms, doors, windows, furniture and floor images. No access points,
-              antennas, results or logs.
-            </small>
-          </label>
-        )}
         <div className="dialog-actions">
           <button type="button" onClick={onCancel}>Cancel</button>
           <button type="submit" className="primary" disabled={!name.trim()}>Create project</button>
@@ -129,15 +110,10 @@ export default function ProjectsPage() {
   }, []);
 
   const create = () => setCreating(true);
-  const finishCreate = async (name, copyFromId) => {
+  const finishCreate = async (name) => {
     setCreating(false);
     try {
-      let plan = { ...initialPlan(), projectType: workspace };
-      if (copyFromId) {
-        const source = (await getProject(copyFromId)).plan;
-        for (const key of BUILDING_KEYS) if (source[key] !== undefined) plan[key] = source[key];
-      }
-      const project = await createProject(name, plan);
+      const project = await createProject(name, { ...initialPlan(), projectType: workspace });
       navigate(`/projects/${project.id}/design`);
     } catch (error) {
       setMessage(error.message);
@@ -257,7 +233,7 @@ export default function ProjectsPage() {
         </section>
       </main>
       {creating && (
-        <NewProjectDialog workspace={workspace} projects={projects} onCancel={() => setCreating(false)} onCreate={finishCreate} />
+        <NewProjectDialog workspace={workspace} onCancel={() => setCreating(false)} onCreate={finishCreate} />
       )}
     </div>
   );

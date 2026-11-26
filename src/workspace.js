@@ -66,20 +66,3 @@ export function useWorkspace() {
         : null;
   return { ready: Boolean(licensed), licensed: licensed || [], workspace, choose };
 }
-
-// What a new project copies from another one: the building only, never its
-// network (APs, antennas, carriers), results, logs or alignment.
-export const BUILDING_KEYS = [
-  "floors",
-  "selectedFloorId",
-  "rooms",
-  "doors",
-  "windows",
-  "interiorWalls",
-  "furniture",
-  "boundaries",
-  "wallTypes",
-  "wallThickness",
-  "property",
-  "images",
-];

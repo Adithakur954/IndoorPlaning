@@ -357,14 +357,6 @@ small {
   font-size: 13px;
   font-weight: 600;
 }
-.dialog-field + .dialog-field {
-  margin-top: 16px;
-}
-.dialog-hint {
-  font-weight: 400;
-  color: #5f736c;
-  font-size: 12px;
-}
 .workspace-switch {
   display: inline-flex;
   border: 1px solid #dce7e2;
