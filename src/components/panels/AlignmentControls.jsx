@@ -98,7 +98,7 @@ function BuildingAlignmentSetup({ alignment, rooms, onSave, onBack }) {
   useEffect(() => {
     const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
     if (!key) {
-      setMapError("Add VITE_GOOGLE_MAPS_API_KEY to enable place search and map alignment.");
+      setMapError("Add Map_Key to enable place search and map alignment.");
       return;
     }
     let mapClickListener;
