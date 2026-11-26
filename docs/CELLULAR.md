@@ -24,10 +24,11 @@ results are not affected by anything in it.
    with a cellular-only license the app opens there directly) and create or open a Cellular project.
    Each project is Wi-Fi or Cellular, never both.
    In the editor, press **Cellular**.
-2. **Antenna models → Import catalogue…**: a vendor catalogue file (JSON, format below). A sample
-   typed from the Frog datasheets is in `docs/catalogues/frog-ibs-antennas.json`. Measured
-   pattern files (`.msi`) can be attached to a model; they win over the datasheet numbers
-   within ±15 % of their frequency.
+2. **Antenna models** (Network & RF) are built in from the supplied datasheets
+   (`src/infra/cellular/builtInAntennas.js`): one pattern per antenna with a row per band
+   (700/900, 1800-2600 incl. 2300, 3500 MHz). Another vendor's models can be imported as a
+   catalogue file (JSON, format below). Measured pattern files (`.msi`) can be attached to a
+   model; they win over the datasheet numbers within ±15 % of their frequency.
 3. **Carriers**: one per operator and band (LTE or NR, 3GPP band, downlink frequency,
    bandwidth, NR subcarrier spacing, which sectors send it).
 4. **Sectors**: each sector is its own cell on every carrier it sends.

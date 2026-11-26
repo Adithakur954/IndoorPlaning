@@ -5,7 +5,7 @@
 //
 // plan.cellular = {
 //   version: 1,
-//   catalogue: { antennas: { id: entry } },   // the project's parts (imported or typed), over the defaults
+//   catalogue: { antennas: { id: entry } },   // models the project imported, besides the built-in ones
 //   carriers: [{ id, name, operator, technology: "LTE"|"NR", band, freqMHz, bandwidthMHz, scsKHz, sectorIds }],
 //   sectors:  [{ id, name }],
 // A carrier is sent by every sector in sectorIds (null: all of them); each sector is its own cell on that
@@ -13,9 +13,11 @@
 //   settings: { ... see DEFAULT_SETTINGS },
 //   prediction: { jobId, carrierId, at, settings } | undefined,
 // }
-// No value here belongs to one client: every number is entered or imported per project.
+// The antenna models are the built-in ones (builtInAntennas.js, from the supplied
+// datasheets) plus any the project imported; carriers and targets are per project.
 
 import { DEFAULT_CATALOGUE } from "./engine/catalogue.js";
+import { BUILT_IN_ANTENNAS } from "./builtInAntennas.js";
 import { bandCentreMHz, carrierProblems } from "./bands.js";
 import { bandProblems } from "./antennaPattern.js";
 
@@ -65,9 +67,15 @@ export function cellularOf(plan) {
   };
 }
 
-// The project's antenna models: its own entries over the built-in generic ones.
+// The project's antenna models: the built-in ones and the project's imported
+// ones (an import with the same id replaces the built-in entry). An old generic
+// placeholder stays available only while an antenna still uses it.
 export function antennaModels(plan) {
-  return { ...DEFAULT_CATALOGUE.antennas, ...cellularOf(plan).catalogue.antennas };
+  const used = {};
+  for (const s of plan?.sources || [])
+    if (s.kind === "cellular" && DEFAULT_CATALOGUE.antennas[s.antennaModelId])
+      used[s.antennaModelId] = DEFAULT_CATALOGUE.antennas[s.antennaModelId];
+  return { ...BUILT_IN_ANTENNAS, ...used, ...cellularOf(plan).catalogue.antennas };
 }
 
 export const cellularAntennas = (plan, floorId) =>

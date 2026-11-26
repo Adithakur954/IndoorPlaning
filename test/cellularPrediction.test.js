@@ -192,13 +192,15 @@ test("Wi-Fi scenes leave cellular antennas out, cellular-only and geometry-only 
   assert.equal((await buildSceneFiles(moved, { sources: "none" })).config.contentSha256, none.config.contentSha256);
 });
 
-import { readFileSync } from "node:fs";
 import { parseCatalogue, withPatternFile } from "../src/infra/cellular/catalogueImport.js";
-import { mapRanges } from "../src/infra/cellular/model.js";
+import { antennaModels, mapRanges } from "../src/infra/cellular/model.js";
+import { BUILT_IN_ANTENNA_LIST, BUILT_IN_ANTENNAS } from "../src/infra/cellular/builtInAntennas.js";
 import { cellStats, cellularCells } from "../src/infra/cellular/mapCells.js";
 
-test("a vendor catalogue file imports, and a wrong file imports nothing", () => {
-  const text = readFileSync(new URL("../docs/catalogues/frog-ibs-antennas.json", import.meta.url), "utf8");
+test("the built-in antennas are checked, every project has them, and a wrong catalogue file imports nothing", () => {
+  const text = JSON.stringify({ antennas: BUILT_IN_ANTENNA_LIST });
+  assert.deepEqual(Object.keys(antennaModels(initialPlan())).sort(), Object.keys(BUILT_IN_ANTENNAS).sort());
+  assert.equal(BUILT_IN_ANTENNAS["frog-FR-AOF0740-25-NF-1C-IS"].name, "Omni SISO");
   const { antennas, errors } = parseCatalogue(text);
   assert.deepEqual(errors, []);
   const omniEntry = antennas["frog-FR-AOF0740-25-NF-1C-IS"];

@@ -23,9 +23,6 @@ import {
   newCarrier,
   newSector,
 } from "../../infra/cellular/model.js";
-import { DEFAULT_CATALOGUE } from "../../infra/cellular/engine/catalogue.js";
-// Sample catalogue typed from the vendor's datasheets (docs/catalogues); added on request only.
-import sampleCatalogue from "../../../docs/catalogues/frog-ibs-antennas.json?raw";
 
 const fmt = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : "–");
 
@@ -470,8 +467,9 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
       <section className="inspector-section">
         <h4>Antenna models</h4>
         <p className="hint">
-          Import the vendor's catalogue file (JSON) and, when you have them, measured pattern files (.msi). Without a
-          pattern file the pattern is shaped from the datasheet gain and beamwidths.
+          Built in from the supplied datasheets: one pattern per antenna, with a row for each band (700/900, 1800-2600
+          incl. 2300, 3500 MHz). The prediction uses the row of the carrier's frequency. A measured pattern file (.msi)
+          can be attached to a model and wins near its frequency.
         </p>
         <input
           ref={catalogueInput}
@@ -493,30 +491,22 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
             e.target.value = "";
           }}
         />
-        <div className="button-row">
-          <button type="button" onClick={() => catalogueInput.current?.click()}>
-            Import catalogue…
-          </button>
-          <button
-            type="button"
-            title="Frog Cellsat FROG-IBS antennas, typed from the vendor datasheets"
-            onClick={() => addCatalogue(sampleCatalogue, "the Frog IBS sample catalogue")}
-          >
-            Add Frog IBS antennas (sample)
-          </button>
-        </div>
+        <button type="button" onClick={() => catalogueInput.current?.click()}>
+          Import another vendor's catalogue…
+        </button>
         {catalogueNote?.error && <p className="error">{catalogueNote.error}</p>}
         {catalogueNote?.ok && <p className="hint">{catalogueNote.ok}</p>}
         {Object.values(models).map((m) => {
-          const builtIn = Boolean(DEFAULT_CATALOGUE.antennas[m.id]) && !c.catalogue.antennas[m.id];
+          const imported = Boolean(c.catalogue.antennas[m.id]);
           return (
             <details key={m.id}>
               <summary>
-                {m.name} {builtIn ? "(generic placeholder)" : ""}
+                {m.name} {imported ? "(imported)" : m.builtIn ? "" : "(generic placeholder)"}
               </summary>
               <p className="hint">
                 {m.type}
-                {m.model ? ` · ${m.model}` : ""} · {m.source}
+                {m.vendor ? ` · ${m.vendor}` : ""}
+                {m.model ? ` ${m.model}` : ""} · {m.source}
               </p>
               <table className="mini-table">
                 <thead>
