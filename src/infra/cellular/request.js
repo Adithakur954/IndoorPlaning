@@ -44,7 +44,7 @@ export function buildCellularRequest(plan, carrierId, { floorIds } = {}) {
   const sectorIds = new Set(c.sectors.map((s) => s.id));
   const sectorOf = (a) => (sectorIds.has(a.sectorId) ? a.sectorId : c.sectors[0].id);
   const antennas = cellularAntennas(plan).filter((a) => elevation.has(a.floorId) && sending(sectorOf(a)));
-  if (!antennas.length) return { problems: ["No antenna sends this carrier (check the carrier's sectors)."] };
+  if (!antennas.length) return { problems: ["No antenna sends this band (check which sectors send it in Network & RF)."] };
 
   const patterns = {};
   const notes = [];

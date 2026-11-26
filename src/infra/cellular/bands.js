@@ -107,7 +107,41 @@ export function carrierProblems(carrier) {
   return out;
 }
 
+// How a carrier is named on screen: "[operator ·] 5G · 3500 MHz" (4G = LTE, 5G = NR);
+// the operator only when the user typed one,
+// by its band's usual name; the exact frequency is in its settings.
+export const generation = (technology) => (technology === "NR" ? "5G" : technology === "LTE" ? "4G" : technology);
 export function carrierLabel(c) {
-  const parts = [c.operator, c.name || (c.band ? `${c.technology} ${c.band}` : c.technology), `${c.freqMHz} MHz`];
+  const preset = presetOf(c);
+  const parts = [c.operator, c.name || generation(c.technology), `${preset ? preset.mhz : c.freqMHz} MHz`];
   return parts.filter(Boolean).join(" · ");
+}
+
+// The bands offered as buttons (Network & RF), by the name people use for them.
+// Each maps to its 3GPP band for 4G and 5G; the first technology is the default.
+export const BAND_PRESETS = [
+  { mhz: 700, LTE: "B28", NR: "n28", first: "NR" },
+  { mhz: 900, LTE: "B8", NR: "n8", first: "LTE" },
+  { mhz: 1800, LTE: "B3", NR: "n3", first: "LTE" },
+  { mhz: 2100, LTE: "B1", NR: "n1", first: "LTE" },
+  { mhz: 2300, LTE: "B40", NR: "n40", first: "LTE" },
+  { mhz: 2500, LTE: "B41", NR: "n41", first: "LTE" },
+  { mhz: 3500, LTE: "B42", NR: "n78", first: "NR" },
+];
+
+// The preset a carrier belongs to (by its 3GPP band), or null for a custom one.
+export const presetOf = (carrier) =>
+  BAND_PRESETS.find((p) => p[carrier?.technology] && p[carrier.technology] === carrier.band) || null;
+
+// Carrier fields for a preset band: the named frequency when it lies inside the
+// band (3500 in n78), else the middle of the band's downlink; a usual
+// bandwidth for that band (wide for 5G TDD).
+export function presetCarrierFields(preset, technology = preset.first) {
+  const band = preset[technology];
+  const { dl, duplex } = BANDS[technology][band];
+  const freqMHz = preset.mhz > dl[0] && preset.mhz < dl[1] ? preset.mhz : (dl[0] + dl[1]) / 2;
+  const nr = technology === "NR";
+  const scsKHz = nr ? (duplex === "TDD" ? 30 : 15) : 15;
+  const bandwidthMHz = nr ? (duplex === "TDD" ? (band === "n78" ? 100 : 40) : 10) : 20;
+  return { technology, band, freqMHz, scsKHz, bandwidthMHz };
 }

@@ -1,6 +1,7 @@
 // Legend of the cellular map (RSRP or SINR of the best cell). Separate from the
 // Wi-Fi legend so neither changes the other.
 import React, { useState } from "react";
+import { carrierLabel } from "../../infra/cellular/bands.js";
 
 const label = (band, unit) =>
   !Number.isFinite(band.min)
@@ -25,7 +26,7 @@ export default function CellularLegend({ cellular }) {
             <h4>{cellular.metric === "sinr" ? "SINR (best cell)" : "RSRP (best cell)"}</h4>
             {carrier && (
               <small className="hint">
-                {[carrier.operator, carrier.technology, carrier.band, `${carrier.freqMHz} MHz`].filter(Boolean).join(" · ")}
+                {carrierLabel(carrier)}
               </small>
             )}
             {[...cellular.ranges].reverse().map((band, i) => (

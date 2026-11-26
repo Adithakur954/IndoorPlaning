@@ -7,11 +7,13 @@ import Field from "../ui/Field.jsx";
 import { timeLabel } from "../../utils/savedResults.js";
 import {
   BANDS,
-  TECHNOLOGIES,
-  bandCentreMHz,
   bandwidthsFor,
+  BAND_PRESETS,
   carrierLabel,
   carrierProblems,
+  generation,
+  presetCarrierFields,
+  presetOf,
   subcarrierSpacingsFor,
 } from "../../infra/cellular/bands.js";
 import { bandEntry, bandProblems, patternFileFor } from "../../infra/cellular/antennaPattern.js";
@@ -20,6 +22,7 @@ import {
   antennaModels,
   cellularAntennas,
   cellularOf,
+  defaultAntennaModel,
   newCarrier,
   newSector,
 } from "../../infra/cellular/model.js";
@@ -102,6 +105,12 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
     setCatalogueNote({ ok: `${Object.keys(antennas).length} antenna models imported from ${name}.` });
   };
   const importCatalogue = async (file) => addCatalogue(await file.text(), file.name);
+  const defaultModel = defaultAntennaModel(plan);
+  const addBand = (preset) => {
+    const x = { ...newCarrier(), ...presetCarrierFields(preset) };
+    setCellular((cur) => ({ ...cur, carriers: [...cur.carriers, x] }));
+    cellular.setCarrierId(x.id);
+  };
   const toNetwork = setTab && (
     <button type="button" className="link-button" onClick={() => setTab("network")}>
       Network &amp; RF
@@ -127,12 +136,12 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
         <h4>Prediction</h4>
         {!c.carriers.length ? (
           <p className="hint">
-            Add a carrier (operator, band, frequency and bandwidth) in {toNetwork || "Network & RF"} to run a prediction.
+            Add a band (e.g. 3500 MHz) in {toNetwork || "Network & RF"} to run a prediction.
           </p>
         ) : (
           <div className="inspector-fields">
             <Field
-              label="Carrier"
+              label="Band"
               value={cellular.carrierId || ""}
               options={c.carriers.map((x) => x.id)}
               optionLabels={Object.fromEntries(c.carriers.map((x) => [x.id, carrierLabel(x)]))}
@@ -313,109 +322,196 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
           <p className="hint">Select an antenna on the plan to edit it.</p>
         )}
       </section>
-      <p className="hint">Carriers, sectors, antenna models and prediction settings: {toNetwork || "Network & RF"}.</p>
+      <p className="hint">Bands, antenna type and prediction settings: {toNetwork || "Network & RF"}.</p>
       </>)}
       {network && (<>
 
-      {/* ---------- carriers ---------- */}
+      {/* ---------- bands (like Wi-Fi's 2.4 / 5 / 6 GHz) ---------- */}
       <section className="inspector-section">
-        <h4>Carriers</h4>
-        <p className="hint">One per operator and band. Each sector sends it as its own cell.</p>
-        {c.carriers.map((x) => {
-          const problems = carrierProblems(x);
-          const bands = Object.keys(BANDS[x.technology] || {});
-          return (
-            <details key={x.id} open={x.id === cellular.carrierId}>
-              <summary>{carrierLabel(x)}</summary>
-              <div className="inspector-fields">
-                <Field label="Operator" value={x.operator || ""} onChange={(v) => patchCarrier(x.id, { operator: v })} />
-                <Field label="Name" value={x.name || ""} onChange={(v) => patchCarrier(x.id, { name: v })} />
-                <Field
-                  label="Technology"
-                  value={x.technology}
-                  options={TECHNOLOGIES}
-                  onChange={(v) => {
-                    const band = Object.keys(BANDS[v])[0];
-                    patchCarrier(x.id, {
-                      technology: v,
-                      band,
-                      freqMHz: bandCentreMHz(v, band),
-                      scsKHz: v === "LTE" ? 15 : 30,
-                      bandwidthMHz: 20,
-                    });
-                  }}
-                />
-                <Field
-                  label="Band"
-                  value={x.band || ""}
-                  options={bands}
-                  optionLabels={Object.fromEntries(bands.map((b) => [b, `${b} (${BANDS[x.technology][b].name})`]))}
-                  onChange={(v) => patchCarrier(x.id, { band: v, freqMHz: bandCentreMHz(x.technology, v) })}
-                />
-                <Field
-                  label="Downlink frequency (MHz)"
-                  type="number"
-                  value={x.freqMHz}
-                  onChange={(v) => patchCarrier(x.id, { freqMHz: Number(v) })}
-                />
-                {x.technology === "NR" && (
-                  <Field
-                    label="Subcarrier spacing (kHz)"
-                    value={String(x.scsKHz || 30)}
-                    options={subcarrierSpacingsFor("NR").map(String)}
-                    onChange={(v) => patchCarrier(x.id, { scsKHz: Number(v) })}
-                  />
-                )}
-                <Field
-                  label="Bandwidth (MHz)"
-                  value={String(x.bandwidthMHz)}
-                  options={bandwidthsFor(x.technology, x.scsKHz || 30).map(String)}
-                  onChange={(v) => patchCarrier(x.id, { bandwidthMHz: Number(v) })}
-                />
-              </div>
-              {c.sectors.length > 1 && (
-                <fieldset className="checks">
-                  <legend>Sent by</legend>
-                  {c.sectors.map((s) => {
-                    const on = !Array.isArray(x.sectorIds) || x.sectorIds.includes(s.id);
-                    return (
-                      <label key={s.id} className="check">
-                        <input
-                          type="checkbox"
-                          checked={on}
-                          onChange={(e) => {
-                            const now = Array.isArray(x.sectorIds) ? x.sectorIds : c.sectors.map((y) => y.id);
-                            const next = e.target.checked ? [...now, s.id] : now.filter((id) => id !== s.id);
-                            patchCarrier(x.id, { sectorIds: next.length === c.sectors.length ? null : next });
-                          }}
-                        />
-                        {s.name}
-                      </label>
-                    );
-                  })}
-                </fieldset>
-              )}
-              {problems.length > 0 && <p className="warn">{problems.join(" ")}</p>}
+        <h4>Bands</h4>
+        <div className="segmented" role="group" aria-label="Bands">
+          {BAND_PRESETS.map((p) => {
+            const x = c.carriers.find((y) => presetOf(y)?.mhz === p.mhz);
+            return (
               <button
+                key={p.mhz}
                 type="button"
-                className="danger"
-                onClick={() => setCellular((cur) => ({ ...cur, carriers: cur.carriers.filter((y) => y.id !== x.id) }))}
+                className={x && x.id === carrier?.id ? "active" : ""}
+                title={x ? carrierLabel(x) : `Add the ${p.mhz} MHz band`}
+                onClick={() => (x ? cellular.setCarrierId(x.id) : addBand(p))}
               >
-                Remove carrier
+                {x ? p.mhz : `+ ${p.mhz}`}
               </button>
-            </details>
-          );
-        })}
-        <div className="button-row">
-          <button type="button" onClick={() => setCellular((cur) => ({ ...cur, carriers: [...cur.carriers, newCarrier("LTE", "B3")] }))}>
-            Add LTE carrier
-          </button>
-          <button type="button" onClick={() => setCellular((cur) => ({ ...cur, carriers: [...cur.carriers, newCarrier("NR", "n78")] }))}>
-            Add NR carrier
-          </button>
+            );
+          })}
+          {c.carriers
+            .filter((y) => !presetOf(y))
+            .map((y) => (
+              <button
+                key={y.id}
+                type="button"
+                className={y.id === carrier?.id ? "active" : ""}
+                onClick={() => cellular.setCarrierId(y.id)}
+              >
+                {y.freqMHz}
+              </button>
+            ))}
         </div>
+        {!carrier ? (
+          <p className="hint">Click each band the building needs, e.g. 700, 2300 and 3500 MHz.</p>
+        ) : (
+          (() => {
+            const preset = presetOf(carrier);
+            const info = BANDS[carrier.technology]?.[carrier.band];
+            const problems = carrierProblems(carrier);
+            return (
+              <>
+                {preset && (
+                  <div className="segmented" role="group" aria-label="Technology">
+                    {["LTE", "NR"].map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        className={carrier.technology === t ? "active" : ""}
+                        onClick={() => carrier.technology !== t && patchCarrier(carrier.id, presetCarrierFields(preset, t))}
+                      >
+                        {generation(t)} ({t})
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="inspector-fields">
+                  <Field
+                    label="Operator"
+                    value={carrier.operator || ""}
+                    onChange={(v) => patchCarrier(carrier.id, { operator: v })}
+                  />
+                  <Field
+                    label="Bandwidth (MHz)"
+                    value={String(carrier.bandwidthMHz)}
+                    options={bandwidthsFor(carrier.technology, carrier.scsKHz || 30).map(String)}
+                    onChange={(v) => patchCarrier(carrier.id, { bandwidthMHz: Number(v) })}
+                  />
+                  <Field
+                    label="Frequency (MHz)"
+                    type="number"
+                    value={carrier.freqMHz}
+                    onChange={(v) => patchCarrier(carrier.id, { freqMHz: Number(v) })}
+                  />
+                  {carrier.technology === "NR" && (
+                    <Field
+                      label="Subcarrier spacing (kHz)"
+                      value={String(carrier.scsKHz || 30)}
+                      options={subcarrierSpacingsFor("NR").map(String)}
+                      onChange={(v) => patchCarrier(carrier.id, { scsKHz: Number(v) })}
+                    />
+                  )}
+                </div>
+                {info && (
+                  <small className="hint">
+                    3GPP band {carrier.band} · {info.duplex} · downlink {info.dl[0]}-{info.dl[1]} MHz
+                  </small>
+                )}
+                {c.sectors.length > 1 && (
+                  <fieldset className="checks">
+                    <legend>Sent by</legend>
+                    {c.sectors.map((s) => {
+                      const on = !Array.isArray(carrier.sectorIds) || carrier.sectorIds.includes(s.id);
+                      return (
+                        <label key={s.id} className="check">
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            onChange={(e) => {
+                              const now = Array.isArray(carrier.sectorIds) ? carrier.sectorIds : c.sectors.map((y) => y.id);
+                              const next = e.target.checked ? [...now, s.id] : now.filter((id) => id !== s.id);
+                              patchCarrier(carrier.id, { sectorIds: next.length === c.sectors.length ? null : next });
+                            }}
+                          />
+                          {s.name}
+                        </label>
+                      );
+                    })}
+                  </fieldset>
+                )}
+                {problems.length > 0 && <p className="warn">{problems.join(" ")}</p>}
+                <button
+                  type="button"
+                  className="danger-text"
+                  onClick={() => setCellular((cur) => ({ ...cur, carriers: cur.carriers.filter((y) => y.id !== carrier.id) }))}
+                >
+                  Remove {preset ? `${preset.mhz} MHz` : "this"} band
+                </button>
+              </>
+            );
+          })()
+        )}
       </section>
 
+      {/* ---------- antenna for new antennas: ceiling or wall ---------- */}
+      <section className="inspector-section">
+        <h4>Antenna</h4>
+        <div className="segmented" role="group" aria-label="Antenna type">
+          {[
+            ["omni", "Ceiling (omni)"],
+            ["panel", "Wall (panel)"],
+          ].map(([type, label]) => {
+            const m = Object.values(models).find((x) => x.builtIn && x.type === type);
+            if (!m) return null;
+            return (
+              <button
+                key={type}
+                type="button"
+                className={defaultModel?.id === m.id ? "active" : ""}
+                onClick={() => patchSettings({ defaultAntennaModelId: m.id })}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        {defaultModel && (
+          <p className="hint">
+            <strong>{defaultModel.name}</strong>
+            {defaultModel.vendor ? ` · ${defaultModel.vendor}` : ""}
+            {defaultModel.model ? ` ${defaultModel.model}` : ""}
+            <br />
+            {(() => {
+              if (carrier) {
+                const row = bandEntry(defaultModel, carrier.freqMHz);
+                return row
+                  ? `At ${carrierLabel(carrier)}: ${row.gainDbi} dBi, beam ${row.hBeamwidthDeg}° × ${row.vBeamwidthDeg}°`
+                  : `Its datasheet has no row for ${carrier.freqMHz} MHz: choose another antenna or band.`;
+              }
+              return BAND_PRESETS.map((p) => {
+                const row = bandEntry(defaultModel, presetCarrierFields(p).freqMHz);
+                return row ? `${p.mhz}: ${row.gainDbi} dBi` : null;
+              })
+                .filter(Boolean)
+                .join(" · ");
+            })()}
+          </p>
+        )}
+        <div className="inspector-fields">
+          <Field
+            label="Port power (dBm)"
+            type="number"
+            value={c.settings.defaultAntennaPowerDbm}
+            onChange={(v) => patchSettings({ defaultAntennaPowerDbm: Number(v) })}
+          />
+          <Field
+            label="Height (m)"
+            type="number"
+            value={plan.rf?.newCellHeightM ?? 3}
+            onChange={(v) => mutate((p) => ({ ...p, rf: { ...p.rf, newCellHeightM: Number(v) } }))}
+          />
+        </div>
+        <p className="hint">For each new antenna you place; each one can be changed in the editor.</p>
+      </section>
+
+      {/* ---------- advanced ---------- */}
+      <details className="inspector-section">
+        <summary>Advanced: sectors, antenna datasheets, prediction settings</summary>
       {/* ---------- sectors ---------- */}
       <section className="inspector-section">
         <h4>Sectors</h4>
@@ -465,11 +561,10 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
 
       {/* ---------- antenna models ---------- */}
       <section className="inspector-section">
-        <h4>Antenna models</h4>
+        <h4>Antenna datasheets</h4>
         <p className="hint">
-          Built in from the supplied datasheets: one pattern per antenna, with a row for each band (700/900, 1800-2600
-          incl. 2300, 3500 MHz). The prediction uses the row of the carrier's frequency. A measured pattern file (.msi)
-          can be attached to a model and wins near its frequency.
+          One pattern per antenna, with a row per band; the prediction uses the row of the band's frequency. A
+          measured pattern file (.msi) can be attached and wins near its frequency.
         </p>
         <input
           ref={catalogueInput}
@@ -579,7 +674,6 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
             ["ueNoiseFigureDb", "Handset noise figure (dB)"],
             ["rsrpTargetDbm", "RSRP target (dBm)"],
             ["sinrTargetDb", "SINR target (dB)"],
-            ["defaultAntennaPowerDbm", "New antenna port power (dBm)"],
           ].map(([key, label]) => (
             <Field key={key} label={label} type="number" value={c.settings[key]} onChange={(v) => patchSettings({ [key]: Number(v) })} />
           ))}
@@ -597,13 +691,8 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
             <input type="checkbox" checked={c.settings.diffraction} onChange={(e) => patchSettings({ diffraction: e.target.checked })} />
             Diffraction (slower)
           </label>
-          <Field
-            label="New antenna height (m)"
-            type="number"
-            value={plan.rf?.newCellHeightM ?? 3}
-            onChange={(v) => mutate((p) => ({ ...p, rf: { ...p.rf, newCellHeightM: Number(v) } }))}
-          />
         </div>
+      </details>
       </details>
       </>)}
     </div>

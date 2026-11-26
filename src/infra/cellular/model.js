@@ -29,6 +29,7 @@ export const DEFAULT_SETTINGS = {
   diffraction: false,
   ueNoiseFigureDb: 7, // handset receiver noise figure, for SINR
   defaultAntennaPowerDbm: 15, // power at a new antenna's port until the DAS network sets it
+  defaultAntennaModelId: null, // antenna model of a new antenna (null: the built-in omni)
   rsrpTargetDbm: -95,
   sinrTargetDb: 5,
   // colour band edges of the maps (low to high); editable per project
@@ -102,17 +103,28 @@ export function newSector(existing) {
 }
 
 // Fields a new cellular antenna starts with (it is a plan source of kind "cellular").
+// The model a new antenna gets: the one chosen in Network & RF, else the first omni.
+export function defaultAntennaModel(plan) {
+  const models = antennaModels(plan);
+  return (
+    models[cellularOf(plan).settings.defaultAntennaModelId] ||
+    Object.values(models).find((m) => m.type === "omni") ||
+    Object.values(models)[0] ||
+    null
+  );
+}
+
 export function newAntennaFields(plan) {
   const c = cellularOf(plan);
-  const models = antennaModels(plan);
-  const first = Object.values(models).find((m) => m.type === "omni") || Object.values(models)[0];
+  const model = defaultAntennaModel(plan);
   return {
     kind: "cellular",
     name: "Antenna",
     technology: null,
-    antennaModelId: first?.id || null,
+    antennaModelId: model?.id || null,
     sectorId: c.sectors[0]?.id || "sector-1",
-    mount: "ceiling",
+    // a panel goes on a wall facing the room, an omni on the ceiling
+    mount: model?.type === "panel" ? "wall" : "ceiling",
     azimuthDeg: 0,
     downtiltDeg: 0,
     inputPowerDbm: c.settings.defaultAntennaPowerDbm,
@@ -123,8 +135,8 @@ export function newAntennaFields(plan) {
 export function predictionProblems(plan, carrierId) {
   const c = cellularOf(plan);
   const carrier = c.carriers.find((x) => x.id === carrierId);
-  if (!carrier) return ["Add a carrier (operator, band, frequency and bandwidth) and choose it."];
-  const out = carrierProblems(carrier).map((m) => `Carrier: ${m}.`);
+  if (!carrier) return ["Add a band in Network & RF (e.g. 3500 MHz) and choose it."];
+  const out = carrierProblems(carrier).map((m) => `Band: ${m}.`);
   const antennas = cellularAntennas(plan).filter((a) => plan.floors.some((f) => f.id === a.floorId));
   if (!antennas.length) out.push("Place at least one antenna on the plan.");
   const models = antennaModels(plan);

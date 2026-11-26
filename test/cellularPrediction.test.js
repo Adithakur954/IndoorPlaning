@@ -165,7 +165,7 @@ test("problems are reported in words instead of running a wrong prediction", () 
   plan.cellular.carriers[0].band = null;
   const problems = predictionProblems(plan, "c1");
   assert.ok(problems.some((p) => /GF-A1: Test omni has no datasheet values at 1500 MHz/.test(p)));
-  assert.match(predictionProblems(plan, "nope")[0], /Add a carrier/);
+  assert.match(predictionProblems(plan, "nope")[0], /Add a band/);
   assert.deepEqual(buildCellularRequest(plan, "c1").request, undefined);
 });
 
