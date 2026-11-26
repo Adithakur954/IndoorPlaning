@@ -506,6 +506,40 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
           />
         </div>
         <p className="hint">For each new antenna you place; each one can be changed in the editor.</p>
+        <div className="button-row">
+          <button
+            type="button"
+            disabled={!allAntennas.length || !defaultModel}
+            title="Give every placed antenna this type, port power and height"
+            onClick={() => {
+              const power = Number(c.settings.defaultAntennaPowerDbm);
+              const height = Number(plan.rf?.newCellHeightM ?? 3);
+              if (
+                !window.confirm(
+                  `Set all ${allAntennas.length} antennas to ${defaultModel.name}, ${power} dBm port power and ${height} m height? ` +
+                    "Values typed on single antennas are replaced.",
+                )
+              )
+                return;
+              mutate((p) => ({
+                ...p,
+                sources: p.sources.map((s) =>
+                  s.kind === "cellular"
+                    ? {
+                        ...s,
+                        antennaModelId: defaultModel.id,
+                        mount: defaultModel.type === "panel" ? "wall" : "ceiling",
+                        inputPowerDbm: power,
+                        heightM: height,
+                      }
+                    : s,
+                ),
+              }));
+            }}
+          >
+            Apply to existing antennas ({allAntennas.length})
+          </button>
+        </div>
       </section>
 
       {/* ---------- advanced ---------- */}
