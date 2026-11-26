@@ -332,6 +332,31 @@ small {
   background: #e8eefb;
   color: #2a4fa8;
 }
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: #0b2a2266;
+}
+.dialog {
+  width: min(440px, calc(100vw - 32px));
+  background: #fff;
+  border-radius: 14px;
+  padding: 24px;
+  box-shadow: 0 20px 60px #0b2a2233;
+}
+.dialog h2 {
+  margin: 0 0 16px;
+  font-size: 20px;
+}
+.dialog-field {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
 .dialog-field + .dialog-field {
   margin-top: 16px;
 }
