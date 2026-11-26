@@ -545,7 +545,7 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
                 >
                   Attach pattern file…
                 </button>
-                {!builtIn && (
+                {imported && (
                   <button
                     type="button"
                     className="danger"
