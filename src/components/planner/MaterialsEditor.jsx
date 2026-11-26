@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { materialLabels } from "../../config/materialColors.js";
+import { metresToUnit, unitToMetres, useMeasurementUnit } from "../../utils/measurementUnits.jsx";
 import {
   MATERIAL_NAMES,
   defaultLossDb,
@@ -33,6 +34,7 @@ function NumberInput({ value, onCommit, min, step = "0.01" }) {
 // Manual wall-material settings. Empty fields keep the ITU-R P.2040 defaults.
 export default function MaterialsEditor({ plan, mutate }) {
   const [reference, setReference] = useState("5 GHz");
+  const unit = useMeasurementUnit();
   const freq = REFERENCE[reference];
   const wallT = Number(plan.wallThickness) || 0.2;
   const overrides = plan.materialOverrides || {};
@@ -69,11 +71,11 @@ export default function MaterialsEditor({ plan, mutate }) {
         </select>
       </label>
       <label className="field">
-        <span>Default wall thickness (m)</span>
+        <span>Default wall thickness ({unit})</span>
         <NumberInput
-          min={0.01}
-          value={plan.wallThickness ?? 0.2}
-          onCommit={(v) => mutate((p) => ({ ...p, wallThickness: v }))}
+          min={metresToUnit(0.01, unit)}
+          value={metresToUnit(plan.wallThickness ?? 0.2, unit)}
+          onCommit={(v) => mutate((p) => ({ ...p, wallThickness: unitToMetres(v, unit) }))}
         />
       </label>
       {MATERIAL_NAMES.map((m) => {
@@ -91,7 +93,7 @@ export default function MaterialsEditor({ plan, mutate }) {
                 {Number.isFinite(fallback)
                   ? `${fallback.toFixed(1)} dB`
                   : "blocks all signal"}{" "}
-                at {thickness} m
+                at {metresToUnit(thickness, unit)} {unit}
               </small>
               {edited && (
                 <button
@@ -109,14 +111,14 @@ export default function MaterialsEditor({ plan, mutate }) {
             </div>
             <div className="material-fields">
               <label>
-                <span>Thickness (m)</span>
+                <span>Thickness ({unit})</span>
                 <input
                   type="number"
-                  step="0.01"
-                  min="0.001"
-                  placeholder={String(wallT)}
-                  value={o.thicknessM ?? ""}
-                  onChange={(e) => set(m, { thicknessM: e.target.value })}
+                  step={metresToUnit(0.01, unit)}
+                  min={metresToUnit(0.001, unit)}
+                  placeholder={String(metresToUnit(wallT, unit))}
+                  value={o.thicknessM == null || o.thicknessM === "" ? "" : metresToUnit(o.thicknessM, unit)}
+                  onChange={(e) => set(m, { thicknessM: e.target.value === "" ? "" : unitToMetres(e.target.value, unit) })}
                 />
               </label>
               <label>

@@ -15,6 +15,7 @@ import { getProfiles, sourceFieldsFromProfile } from "../../config/apProfiles.js
 import { readFloorMeta } from "../../utils/excelPlan.js";
 import { uid } from "../../models/plan.js";
 import { pointsFromPrinted, twoLengthScale } from "../../utils/scaleCalibration.js";
+import { formatLength, metresToUnit, unitToMetres, useMeasurementUnit } from "../../utils/measurementUnits.jsx";
 
 const VIEWS = [
   ["overlay.png", "Detected structure"],
@@ -32,10 +33,11 @@ const POINT_KEYS = ["A", "B", "C", "D"];
 // When the drawing prints its sizes ("190.00 m", "80.00 m"), A-B and C-D are
 // placed on those dimension lines for you to check.
 export default function FloorplanImport({ plan, floorId, mutate, setMessage, setTab, hideImage, showImage }) {
+  const unit = useMeasurementUnit();
   const [upload, setUpload] = useState(null);
   const [pts, setPts] = useState({}); // { A, B, C, D }: preview pixels
-  const [knownLength, setKnownLength] = useState("");   // A-B (m)
-  const [knownHeight, setKnownHeight] = useState("");   // C-D (m)
+  const [knownLength, setKnownLength] = useState("");   // A-B (m, stored internally)
+  const [knownHeight, setKnownHeight] = useState("");   // C-D (m, stored internally)
   const [notStretched, setNotStretched] = useState(false);
   const [printedNote, setPrintedNote] = useState("");
   const [dragging, setDragging] = useState(null);
@@ -113,14 +115,14 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
         ? { pointA: orig(pts.A), pointB: orig(pts.B), lengthM: length, notStretched: true }
         : null;
   const scaleNote = two
-    ? `Across ${two.xPxPerM.toFixed(2)} px/m · up-down ${two.yPxPerM.toFixed(2)} px/m · ` +
+    ? `Across ${(two.xPxPerM * unitToMetres(1, unit)).toFixed(2)} px/${unit} · up-down ${(two.yPxPerM * unitToMetres(1, unit)).toFixed(2)} px/${unit} · ` +
       (two.stretchPct > 1
         ? `the picture is stretched by ${two.stretchPct.toFixed(1)} %: it will be corrected.`
         : "the picture is not stretched.")
     : abOk && cdOk
       ? "C-D must run in another direction than A-B (one across, one up-down)."
       : abOk && notStretched
-        ? `${(abPx / length).toFixed(2)} px per metre from A-B, used both ways (you confirmed the picture is not stretched).`
+        ? `${(abPx / (length / unitToMetres(1, unit))).toFixed(2)} px per ${unit} from A-B, used both ways (you confirmed the picture is not stretched).`
         : "Place A-B and C-D and type both real lengths (or tick that the picture is not stretched).";
 
   const detect = async (givenScale = scale, target = upload) => {
@@ -274,7 +276,7 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
       </label>
       {excelMeta && (
         <small className="hint">
-          Excel read: picture size {excelMeta.imageWidthM ?? "?"} × {excelMeta.imageHeightM ?? "?"} m. It is used as the scale
+          Excel read: picture size {excelMeta.imageWidthM == null ? "?" : metresToUnit(excelMeta.imageWidthM, unit)} × {excelMeta.imageHeightM == null ? "?" : metresToUnit(excelMeta.imageHeightM, unit)} {unit}. It is used as the scale
           only when the drawing prints no size.
         </small>
       )}
@@ -339,7 +341,7 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
             </p>
           )}
           <small className="hint">
-            Drawn wall width ≈ {result.wallThickness.m} m (the line on the drawing, not always the real wall) · scale {result.scale.source} ·
+            Drawn wall width ≈ {formatLength(result.wallThickness.m, unit)} (the line on the drawing, not always the real wall) · scale {result.scale.source} ·
             straightened by {result.image.deskewDeg}° · {m.totalSeconds}s on the CPU, peak{" "}
             {m.peakRamMB} MB RAM.
           </small>
@@ -383,7 +385,7 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
           <h3>Scale</h3>
           {result.scale.pxPerM && result.scale.confirmed ? (
             <p className="panel-note">
-              Scale confirmed: {result.scale.pxPerM.toFixed(1)} px per metre ({result.scale.source}).
+              Scale confirmed: {(result.scale.pxPerM * unitToMetres(1, unit)).toFixed(1)} px per {unit} ({result.scale.source}).
               {result.scale.twoLengths && result.scale.twoLengths.stretchPct > 1
                 ? ` The picture was stretched by ${result.scale.twoLengths.stretchPct.toFixed(1)} % and has been corrected.`
                 : ""}
@@ -394,7 +396,7 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
               without keeping its proportions): then one length gets the sizes across right but every size up-down wrong.
               Give two lengths you know: <b>A-B across</b> and <b>C-D up-down</b> (the ends of the dimension lines, or
               walls you have measured).
-              {result.scale.pxPerM ? ` Found so far: ${result.scale.pxPerM.toFixed(1)} px per metre (${result.scale.source}), not yet confirmed.` : ""}
+              {result.scale.pxPerM ? ` Found so far: ${(result.scale.pxPerM * unitToMetres(1, unit)).toFixed(1)} px per ${unit} (${result.scale.source}), not yet confirmed.` : ""}
             </p>
           )}
           {printedNote && <p className="panel-note">{printedNote}</p>}
@@ -406,7 +408,7 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
               Click both ends of a length you know up-down: points <b>C</b> and <b>D</b>.
             </li>
             <li className={(pts.A && pts.B && (notStretched || (pts.C && pts.D))) ? "now" : ""}>
-              Type both real lengths (metres) under the plan and press <b>Apply this scale</b>. Drag a point to move it.
+              Type both real lengths in {unit} under the plan and press <b>Apply this scale</b>. Drag a point to move it.
             </li>
           </ol>
           <div className="calibrate" onPointerMove={drag} onPointerUp={() => setDragging(null)} onPointerLeave={() => setDragging(null)}>
@@ -478,26 +480,26 @@ export default function FloorplanImport({ plan, floorId, mutate, setMessage, set
           </div>
           <div className="form-grid">
             <label className="field">
-              <span>Real length A-B, across (m)</span>
+              <span>Real length A-B, across ({unit})</span>
               <input
                 type="number"
                 min="0"
                 step="any"
                 placeholder={pts.A && pts.B ? "e.g. 190" : "place A and B first"}
-                value={knownLength}
-                onChange={(e) => setKnownLength(e.target.value)}
+                value={knownLength === "" ? "" : metresToUnit(knownLength, unit)}
+                onChange={(e) => setKnownLength(e.target.value === "" ? "" : unitToMetres(e.target.value, unit))}
                 disabled={!(pts.A && pts.B)}
               />
             </label>
             <label className="field">
-              <span>Real length C-D, up-down (m)</span>
+              <span>Real length C-D, up-down ({unit})</span>
               <input
                 type="number"
                 min="0"
                 step="any"
                 placeholder={notStretched ? "not needed" : pts.C && pts.D ? "e.g. 80" : "place C and D first"}
-                value={knownHeight}
-                onChange={(e) => setKnownHeight(e.target.value)}
+                value={knownHeight === "" ? "" : metresToUnit(knownHeight, unit)}
+                onChange={(e) => setKnownHeight(e.target.value === "" ? "" : unitToMetres(e.target.value, unit))}
                 disabled={notStretched || !(pts.C && pts.D)}
               />
             </label>

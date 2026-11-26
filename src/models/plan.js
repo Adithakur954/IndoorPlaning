@@ -12,7 +12,7 @@ export const initialPlan = () => ({
   sources: [],
   wallTypes: {},
   wallThickness: 0.2,
-  property: { carpetAreaM2: null, static: true },
+  property: { carpetAreaM2: null, static: true, unit: "m" },
   rf: {
     gridStepM: 1,
     rxGainDbi: 0,

@@ -1,4 +1,5 @@
 import React, { useId } from "react";
+import { formatArea } from "../../utils/measurementUnits.jsx";
 
 export const ZOOM_MIN = 0.25;
 export const ZOOM_MAX = 4;
@@ -30,6 +31,7 @@ export default function WorkspaceFooter({
   floorName,
   rooms,
   area,
+  unit = "m",
   sources,
   saveState,
   view,
@@ -59,7 +61,7 @@ export default function WorkspaceFooter({
           <strong>{rooms}</strong> Rooms
         </span>
         <span>
-          <strong>{area.toFixed(1)}</strong> m²
+          <strong>{formatArea(area, unit)}</strong>
         </span>
         <span>
           <strong>{sources}</strong> Sources

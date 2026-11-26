@@ -1,5 +1,14 @@
 import React from "react";
 import RotateControls from "./RotateControls.jsx";
+import {
+  MEASUREMENT_UNITS,
+  areaUnitFor,
+  measurementUnitName,
+  metresToUnit,
+  squareMetresToUnit,
+  unitToMetres,
+  unitToSquareMetres,
+} from "../../utils/measurementUnits.jsx";
 
 export default function PropertyMenu({ active, onOpen }) {
   return (
@@ -15,6 +24,8 @@ export default function PropertyMenu({ active, onOpen }) {
 }
 
 export function PropertyOptions({
+  unit = "m",
+  onUnitChange,
   carpetArea,
   isCustom,
   isStatic,
@@ -37,22 +48,30 @@ export function PropertyOptions({
 }) {
   return (
     <>
+      <label className="field">
+        <span>Building measurement units</span>
+        <select value={unit} onChange={(event) => onUnitChange(event.target.value)}>
+          {MEASUREMENT_UNITS.map((option) => (
+            <option key={option} value={option}>{measurementUnitName(option)}</option>
+          ))}
+        </select>
+      </label>
       <label className="property-area-field">
         <span>Carpet area</span>
         <span className="property-area-input">
           <input
-            aria-label="Carpet area in square metres"
+            aria-label={`Carpet area in ${areaUnitFor(unit)} squared`}
             type="number"
             min="0"
-            step="0.1"
-            value={Number.isFinite(carpetArea) ? carpetArea : ""}
+            step={squareMetresToUnit(0.1, unit)}
+            value={Number.isFinite(carpetArea) ? squareMetresToUnit(carpetArea, unit) : ""}
             onChange={(event) =>
               onChange(
-                event.target.value === "" ? null : Number(event.target.value),
+                event.target.value === "" ? null : unitToSquareMetres(event.target.value, unit),
               )
             }
           />
-          <span>m&#178;</span>
+          <span>{areaUnitFor(unit)}&#178;</span>
         </span>
       </label>
       <div className="property-area-note">
@@ -61,25 +80,25 @@ export function PropertyOptions({
       </div>
       <div className="property-area-size">
         <label>
-          <span>Length (m)</span>
+          <span>Length ({unit})</span>
           <input
-            aria-label="Carpet length in metres"
+            aria-label={`Carpet length in ${unit}`}
             type="number"
             min="0"
-            step="0.1"
-            value={lengthM ?? ""}
-            onChange={(e) => onSize(e.target.value, widthM)}
+            step={metresToUnit(0.1, unit)}
+            value={lengthM == null ? "" : metresToUnit(lengthM, unit)}
+            onChange={(e) => onSize(e.target.value === "" ? "" : unitToMetres(e.target.value, unit), widthM)}
           />
         </label>
         <label>
-          <span>Width (m)</span>
+          <span>Width ({unit})</span>
           <input
-            aria-label="Carpet width in metres"
+            aria-label={`Carpet width in ${unit}`}
             type="number"
             min="0"
-            step="0.1"
-            value={widthM ?? ""}
-            onChange={(e) => onSize(lengthM, e.target.value)}
+            step={metresToUnit(0.1, unit)}
+            value={widthM == null ? "" : metresToUnit(widthM, unit)}
+            onChange={(e) => onSize(lengthM, e.target.value === "" ? "" : unitToMetres(e.target.value, unit))}
           />
         </label>
       </div>
@@ -96,7 +115,7 @@ export function PropertyOptions({
           onClick={onFitBoundary}
         >
           {fit
-            ? `Fitted to boundary (${boundaryAreaM2.toFixed(1)} m²)`
+            ? `Fitted to boundary (${squareMetresToUnit(boundaryAreaM2, unit).toFixed(1)} ${areaUnitFor(unit)}²)`
             : "Fit to external boundary"}
         </button>
       </div>

@@ -15,6 +15,7 @@ import {
   planWifiCapacity,
 } from "../../infra/wifi/capacityModel.js";
 import { areaOf, inside, pointsOf } from "../../utils/geometry.js";
+import { formatArea } from "../../utils/measurementUnits.jsx";
 
 // The capacity engine is WebAssembly and loads once, in the background.
 function useCapacityEngine() {
@@ -126,7 +127,7 @@ export default function CapacityPanel({ plan, mutate, rtMaps = null }) {
       ))}
     </div>
     {/* All tabs stay mounted, so a finished simulation survives a tab switch. */}
-    <div className="panel-grid" style={{ gridTemplateColumns: "minmax(300px, 400px) minmax(0, 1fr)", alignItems: "start", ...shown("demand") }}>
+    <div className="panel-grid capacity-grid" style={shown("demand")}>
       <section className="panel">
         <h2>Demand</h2>
         <h3>People and traffic</h3>
@@ -134,7 +135,7 @@ export default function CapacityPanel({ plan, mutate, rtMaps = null }) {
           <Field label="Number of people (blank = estimate from the density)" type="number" value={settings.totalPeople ?? ""}
             onChange={(v) => set({ totalPeople: v > 0 ? Math.round(v) : null })} />
           {settings.totalPeople == null && (
-            <Field label="People per m² of room" type="number" value={settings.usersPerM2} onChange={num("usersPerM2")} />
+            <Field label="People per m² of room" type="number" measurement="density" value={settings.usersPerM2} onChange={num("usersPerM2")} />
           )}
           <Field label="Devices per person" type="number" value={settings.devicesPerUser} onChange={num("devicesPerUser")} />
           <Field label="Active at a time (%)" type="number" value={Math.round(settings.activeFraction * 100)} onChange={(v) => set({ activeFraction: Math.max(0, Math.min(100, v)) / 100 })} />
@@ -194,7 +195,7 @@ export default function CapacityPanel({ plan, mutate, rtMaps = null }) {
       </section>
     </div>
 
-    <div className="panel-grid" style={{ gridTemplateColumns: "minmax(300px, 400px) minmax(0, 1fr)", alignItems: "start", ...shown("wifi") }}>
+    <div className="panel-grid capacity-grid" style={shown("wifi")}>
       <section className="panel">
         <h2>Wi-Fi radio</h2>
         <div className="inspector-fields">
@@ -318,7 +319,7 @@ export default function CapacityPanel({ plan, mutate, rtMaps = null }) {
       </section>
     </div>
 
-    <div className="panel-grid" style={{ gridTemplateColumns: "minmax(300px, 400px) minmax(0, 1fr)", alignItems: "start", ...shown("simulation") }}>
+    <div className="panel-grid capacity-grid" style={shown("simulation")}>
       <section className="panel">
         <MonteCarloSettings settings={settings} set={set} compact />
         <LoadTestSettings settings={settings} set={set} title="Targets and capacity limit" />
@@ -342,7 +343,7 @@ export default function CapacityPanel({ plan, mutate, rtMaps = null }) {
           <p className="ok"><strong>No bottleneck found for these assumptions</strong></p>
         )}
         <p className="hint">
-          {out.summary.totalUsers} people over {out.summary.floorAreaM2} m² of floor → {out.wan.totalDevices} devices → about {out.wan.activeDevices} active at a time.
+          {out.summary.totalUsers} people over {formatArea(out.summary.floorAreaM2, plan.property?.unit || "m")} of floor → {out.wan.totalDevices} devices → about {out.wan.activeDevices} active at a time.
           Counts are expected loads, so they can be fractions; the Capacity simulation tab places whole users instead.
           {settings.totalPeople == null ? " People are estimated from the density; enter the number of people for a real occupancy." : ""}
         </p>

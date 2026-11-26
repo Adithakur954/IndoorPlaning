@@ -3,9 +3,9 @@ import {
   bbox,
   boundaryAreas,
   edgeMeasures,
-  formatMetres,
   pointsOf,
 } from "../../utils/geometry.js";
+import { formatArea, formatLength, useMeasurementUnit } from "../../utils/measurementUnits.jsx";
 import { buildWalls } from "../../utils/wallGraph.js";
 import { materialColors } from "../../config/materialColors.js";
 import PlanCompass from "./PlanCompass.jsx";
@@ -54,6 +54,7 @@ export default function Plan2D({
   zoom = 1,
   onZoom,
 }) {
+  const unit = useMeasurementUnit();
   const shown = (id) => !hiddenLayers.includes(id);
   const svg = useRef(),
     drag = useRef(null),
@@ -359,7 +360,7 @@ export default function Plan2D({
                   x: +r.x + +r.width / 2,
                   z: +r.z + +r.depth / 2 + measureFont * 1.4,
                   angle: 0,
-                  text: `Ø ${formatMetres(2 * Number(r.radius || r.width / 2))}`,
+                  text: `Ø ${formatLength(2 * Number(r.radius || r.width / 2), unit)}`,
                 },
               ]
             : edgeMeasures(pointsOf(r)).map((m) => ({
@@ -367,7 +368,7 @@ export default function Plan2D({
                 x: m.mid.x + m.inward.x * (wallCore / 2 + measureFont * 0.8),
                 z: m.mid.z + m.inward.z * (wallCore / 2 + measureFont * 0.8),
                 angle: m.angleDeg,
-                text: formatMetres(m.length),
+                text: formatLength(m.length, unit),
               })),
         ),
         ...(shown("boundary") ? plan.boundaries || [] : [])
@@ -379,7 +380,7 @@ export default function Plan2D({
               x: m.mid.x - m.inward.x * (wallCore + measureFont * 0.9),
               z: m.mid.z - m.inward.z * (wallCore + measureFont * 0.9),
               angle: m.angleDeg,
-              text: formatMetres(m.length),
+              text: formatLength(m.length, unit),
               boundary: true,
             })),
           ),
@@ -395,7 +396,7 @@ export default function Plan2D({
             x: m.mid.x + m.inward.x * (0.12 + measureFont * 0.7),
             z: m.mid.z + m.inward.z * (0.12 + measureFont * 0.7),
             angle: m.angleDeg,
-            text: formatMetres(m.length),
+            text: formatLength(m.length, unit),
           })),
         ),
       ];
@@ -889,12 +890,12 @@ export default function Plan2D({
             strokeDasharray=".4 .3"
             pointerEvents="none"
           >
-            <title>{`Uncovered zone: ${z.areaM2} m²`}</title>
+            <title>{`Uncovered zone: ${formatArea(z.areaM2, unit)}`}</title>
           </rect>
         ))}
         {overlay?.candidates?.valid.map((c) => (
           <circle key={c.id} cx={c.x} cy={c.z} r=".14" fill="#16a34a" opacity=".75">
-            <title>{`Valid ${c.kind} position · ${c.roomName} · ${c.heightM} m`}</title>
+            <title>{`Valid ${c.kind} position · ${c.roomName} · ${formatLength(c.heightM, unit)}`}</title>
           </circle>
         ))}
         {overlay?.candidates?.rejected.map((c, i) => (

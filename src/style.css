@@ -107,10 +107,27 @@ small {
   position: relative;
   z-index: 10;
 }
-.editor-header-title {
+.editor-header {
+  height: auto;
+  min-height: 70px;
+  flex-wrap: wrap;
+  align-content: center;
+  gap: 8px 10px;
+  padding: 8px 16px;
+}
+.editor-header > * {
+  flex: 0 0 auto;
+}
+.editor-header button {
+  min-height: 42px;
+  white-space: nowrap;
+}
+.editor-header .editor-quick-tools button {
+  min-height: 38px;
+}
+.editor-header .legend-menu-trigger,
+.editor-header .download-image-trigger {
   flex: none;
-  font-family: Outfit, sans-serif;
-  font-size: 18px;
 }
 .editor-quick-tools {
   display: flex;
@@ -210,19 +227,6 @@ small {
 }
 .project-name:focus {
   outline: 1px solid #73afa2;
-}
-.top-actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.save-state {
-  font-size: 12px;
-  color: #4f8778;
-}
-.save-state.error {
-  color: #b34b46;
 }
 .landing {
   max-width: 1300px;
@@ -356,6 +360,9 @@ small {
   padding: 22px 12px;
   display: flex;
   flex-direction: column;
+}
+.sidebar-collapse-toggle {
+  display: none;
 }
 .sidebar-project {
   display: flex;
@@ -1185,6 +1192,10 @@ body.resizing-panel {
   gap: 16px;
   align-items: start;
 }
+.capacity-grid {
+  grid-template-columns: minmax(300px, 400px) minmax(0, 1fr);
+  align-items: start;
+}
 .panel {
   padding: 24px;
 }
@@ -1603,6 +1614,92 @@ body.resizing-panel {
     grid-template-columns: 1fr;
   }
 }
+@media (max-width: 900px) {
+  .sidebar {
+    width: 68px;
+    padding: 10px 5px;
+    overflow-x: hidden;
+    transition: width 180ms ease;
+  }
+  .sidebar.sidebar-expanded {
+    width: 240px;
+  }
+  .sidebar-collapse-toggle {
+    display: flex;
+    width: 38px;
+    height: 38px;
+    flex: none;
+    align-self: center;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-size: 20px;
+  }
+  .sidebar-project {
+    align-items: stretch;
+    padding: 0 0 12px;
+    gap: 6px;
+  }
+  .sidebar:not(.sidebar-expanded) .sidebar-project-name {
+    display: none;
+  }
+  .sidebar-back-button {
+    width: 38px;
+    align-self: center;
+    justify-content: center;
+    padding: 8px;
+    font-size: 0;
+  }
+  .sidebar-back-button span {
+    font-size: 18px;
+  }
+  .sidebar.sidebar-expanded .sidebar-back-button {
+    width: 100%;
+    justify-content: flex-start;
+    font-size: 13px;
+  }
+  .sidebar.sidebar-expanded .sidebar-project-name {
+    display: block;
+  }
+  .sidebar:not(.sidebar-expanded) .sidebar-heading:not(.with-action) {
+    display: none;
+  }
+  .sidebar-heading.with-action {
+    justify-content: center;
+    margin: 12px 0 6px;
+    padding: 8px 0;
+    font-size: 0;
+  }
+  .sidebar.sidebar-expanded .sidebar-heading.with-action {
+    justify-content: space-between;
+    padding: 8px 13px;
+    font-size: 10px;
+  }
+  .sidebar:not(.sidebar-expanded) nav button {
+    justify-content: center;
+    gap: 0;
+    padding: 11px 0;
+    font-size: 0;
+  }
+  .sidebar:not(.sidebar-expanded) nav button span {
+    width: 18px;
+    margin: 0;
+  }
+  .sidebar:not(.sidebar-expanded) .floor-select {
+    justify-content: center;
+    padding: 9px 0;
+  }
+  .sidebar:not(.sidebar-expanded) .floor-name,
+  .sidebar:not(.sidebar-expanded) .floor-room-disclosure {
+    display: none;
+  }
+  .sidebar:not(.sidebar-expanded) .floor-row .floor-expand {
+    width: 24px;
+  }
+  .capacity-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 @media (max-width: 750px) {
   .alignment-setup {
     padding: 8px;
@@ -1631,7 +1728,7 @@ body.resizing-panel {
     min-height: 120px;
   }
   .sidebar {
-    width: 190px;
+    width: 68px;
     padding: 10px 5px;
   }
   .sidebar-project {
@@ -1652,7 +1749,7 @@ body.resizing-panel {
     display: none;
   }
   .main {
-    max-width: calc(100vw - 190px);
+    max-width: none;
     padding: 17px;
   }
   .main.main-editor {
@@ -1661,9 +1758,6 @@ body.resizing-panel {
   .topbar {
     padding: 0 10px;
     gap: 7px;
-  }
-  .editor-header-title {
-    display: none;
   }
   .editor-quick-tools button {
     width: 36px;
@@ -1681,13 +1775,6 @@ body.resizing-panel {
   }
   .project-name {
     font-size: 14px;
-  }
-  .top-actions {
-    gap: 4px;
-  }
-  .top-actions button {
-    font-size: 11px;
-    padding: 7px;
   }
   .hero {
     padding: 35px 25px;

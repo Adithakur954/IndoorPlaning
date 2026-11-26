@@ -4,6 +4,7 @@ import { INDOOR_LOG_KPIS } from "../../utils/indoorLogKpis.js";
 import { num } from "../../utils/number.js";
 import LogManager from "../planner/LogManager.jsx";
 import FloorplanImport from "../planner/FloorplanImport.jsx";
+import { formatArea, useMeasurementUnit } from "../../utils/measurementUnits.jsx";
 
 export default function DataPanel({
   importBuilding,
@@ -50,6 +51,7 @@ export default function DataPanel({
   totalArea,
   metricRanges,
 }) {
+  const unit = useMeasurementUnit();
   return (
     <div className="panel-grid">
       <FloorplanImport
@@ -83,7 +85,7 @@ export default function DataPanel({
           check the result before applying it.
         </p>
         <Field
-          label="Image width in metres"
+          label="Image width (m)"
           type="number"
           min={0.1}
           value={imageWidth}
@@ -246,12 +248,12 @@ export default function DataPanel({
             <small>Sampled cells</small>
           </div>
           <div>
-            <strong>{sampledArea.toFixed(1)} m²</strong>
+            <strong>{formatArea(sampledArea, unit)}</strong>
             <small>Measured area</small>
           </div>
           <div>
             <strong>
-              {Math.max(0, totalArea - sampledArea).toFixed(1)} m²
+              {formatArea(Math.max(0, totalArea - sampledArea), unit)}
             </strong>
             <small>Unmeasured area</small>
           </div>

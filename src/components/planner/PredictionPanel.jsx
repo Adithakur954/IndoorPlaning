@@ -2,6 +2,7 @@ import React from "react";
 import Field from "../ui/Field.jsx";
 import { timeLabel } from "../../utils/savedResults.js";
 import NoiseSettings from "./NoiseSettings.jsx";
+import { formatArea, useMeasurementUnit } from "../../utils/measurementUnits.jsx";
 
 const open = (v) =>
   v === null || v === undefined || !Number.isFinite(Number(v));
@@ -25,6 +26,7 @@ export default function PredictionPanel({
   predictionRanges,
   weakBelowDbm,
 }) {
+  const unit = useMeasurementUnit();
   const {
     rtSettings,
     setRtSettings,
@@ -173,7 +175,7 @@ export default function PredictionPanel({
                   {plan.floors.find((f) => f.id === id)?.name || id}
                 </strong>
                 <small>
-                  weak {area(weak).toFixed(1)} m² of {area(cells).toFixed(1)} m²
+                  weak {formatArea(area(weak), unit)} of {formatArea(area(cells), unit)}
                   (
                   {cells.length
                     ? ((100 * weak.length) / cells.length).toFixed(0)

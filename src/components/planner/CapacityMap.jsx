@@ -1,5 +1,6 @@
 import React from "react";
 import { bbox, boundaryAreas, pointsOf } from "../../utils/geometry.js";
+import { formatLength, useMeasurementUnit } from "../../utils/measurementUnits.jsx";
 
 const PALETTE = ["#2563eb", "#16a34a", "#d97706", "#9333ea", "#0891b2", "#db2777", "#65a30d", "#dc2626", "#475569", "#0d9488", "#ca8a04", "#7c3aed"];
 export const apColour = (index) => PALETTE[index % PALETTE.length];
@@ -15,6 +16,7 @@ const OK_STATUS = new Set(["ok", "idle"]);
 //  - "problems": how often active devices at a place missed their minimum
 //                over all the Monte Carlo runs.
 export default function CapacityMap({ plan, floorId, clients, aps, layer = "density", users = null, bins = null, selectedUserId = null, onSelectUser = null, links = null }) {
+  const measurementUnit = useMeasurementUnit();
   const here = (clients || []).filter((c) => c.floorId === floorId);
   const people = (users || []).filter((u) => u.floorId === floorId);
   const problems = (bins || []).filter((b) => b.floorId === floorId && b.failPct > 0);
@@ -68,7 +70,7 @@ export default function CapacityMap({ plan, floorId, clients, aps, layer = "dens
             <line x1={selected.x} y1={selected.z} x2={a.x} y2={a.z} stroke={joined ? apColour(index.get(a.id)) : "#94a3b8"}
               strokeWidth={unit / (joined ? 250 : 500)} strokeDasharray={joined ? undefined : `${unit / 150} ${unit / 200}`} />
             <text x={(selected.x + a.x) / 2} y={(selected.z + a.z) / 2} fontSize={unit / 70} fill="#0f172a" textAnchor="middle"
-              stroke="#f8fafc" strokeWidth={unit / 600} paintOrder="stroke">{`${link.distanceM} m`}</text>
+              stroke="#f8fafc" strokeWidth={unit / 600} paintOrder="stroke">{formatLength(link.distanceM, measurementUnit)}</text>
           </g>
         );
       })}
@@ -78,7 +80,7 @@ export default function CapacityMap({ plan, floorId, clients, aps, layer = "dens
           <circle key={u.id} cx={u.x} cy={u.z} r={unit / (isSel ? 90 : 160)} fill={userColour(u)}
             stroke={userFails(u) ? PROBLEM : isSel ? "#0f172a" : "#fff"} strokeWidth={unit / (userFails(u) || isSel ? 400 : 900)}
             style={onSelectUser ? { cursor: "pointer" } : undefined} onClick={onSelectUser ? () => onSelectUser(u.id) : undefined}>
-            <title>{`${u.id} at ${u.x}, ${u.z} m`}</title>
+            <title>{`${u.id} at ${formatLength(u.x, measurementUnit)}, ${formatLength(u.z, measurementUnit)}`}</title>
           </circle>
         );
       })}

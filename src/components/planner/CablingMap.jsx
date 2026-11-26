@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { floorRoutingInput } from "../../infra/core/planGeometry.js";
+import { formatLength, useMeasurementUnit } from "../../utils/measurementUnits.jsx";
 
 const COLOUR = { ok: "#1f8a4c", "near limit": "#d98200", PoE: "#c0392b", "too long": "#c0392b" };
 // walls by what a cable may do there
@@ -42,6 +43,7 @@ export default function CablingMap({
   onRouteClick,
   onMoveWaypoint,
 }) {
+  const unit = useMeasurementUnit();
   const [dragWp, setDragWp] = useState(null); // { apId, index, x, z } while a waypoint is dragged
   const svg = useRef(null);
   const [drag, setDrag] = useState(null); // { id, x, z } while a rack is being dragged
@@ -208,7 +210,7 @@ export default function CablingMap({
         return end && run.floorId === floorId ? (
           <text key={`l${i}`} x={end.x - stroke * 4} y={end.z - stroke * 7} fontSize={stroke * 8}
             fill="#14532d" textAnchor="end">
-            {run.permanentLinkM} m
+            {formatLength(run.permanentLinkM, unit)}
           </text>
         ) : null;
       })}

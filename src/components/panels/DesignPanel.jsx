@@ -9,10 +9,16 @@ import RoomMaterials from "../planner/RoomMaterials.jsx";
 import { EditorToolOptions } from "../planner/EditorMenu.jsx";
 import { PropertyOptions } from "../planner/PropertyMenu.jsx";
 import Field from "../ui/Field.jsx";
+import { formatArea, useMeasurementUnit } from "../../utils/measurementUnits.jsx";
 
 const DEFAULT_PANEL_WIDTH = 340;
 const MIN_PANEL_WIDTH = 260;
 const MAX_PANEL_WIDTH = 760;
+const getPanelMaxWidth = () =>
+  Math.min(
+    MAX_PANEL_WIDTH,
+    Math.max(MIN_PANEL_WIDTH, window.innerWidth - 240 - 360),
+  );
 import MapLegend from "../planner/MapLegend.jsx";
 import PredictionPanel from "../planner/PredictionPanel.jsx";
 import OptimizationPanel from "../planner/OptimizationPanel.jsx";
@@ -112,20 +118,24 @@ export default function DesignPanel({
   applyDraft,
   discardDraft,
 }) {
+  const unit = useMeasurementUnit();
   const [panelWidth, setPanelWidthState] = useState(() => {
     try {
       const saved = Number(localStorage.getItem("planner.panelWidth"));
-      return saved >= MIN_PANEL_WIDTH ? saved : DEFAULT_PANEL_WIDTH;
+      const maxWidth = window.innerWidth > 1100
+        ? getPanelMaxWidth()
+        : MAX_PANEL_WIDTH;
+      return saved >= MIN_PANEL_WIDTH
+        ? Math.min(saved, maxWidth)
+        : Math.min(DEFAULT_PANEL_WIDTH, maxWidth);
     } catch {
       return DEFAULT_PANEL_WIDTH;
     }
   });
   const setPanelWidth = (width) => {
+    const maxWidth = getPanelMaxWidth();
     const next = Math.round(
-      Math.min(
-        Math.max(width, MIN_PANEL_WIDTH),
-        Math.min(MAX_PANEL_WIDTH, window.innerWidth * 0.7),
-      ),
+      Math.min(Math.max(width, MIN_PANEL_WIDTH), maxWidth),
     );
     setPanelWidthState(next);
     try {
@@ -134,6 +144,14 @@ export default function DesignPanel({
       /* storage unavailable: the width just is not remembered */
     }
   };
+  useEffect(() => {
+    const clampPanelWidth = () => {
+      if (window.innerWidth > 1100 && panelWidth > getPanelMaxWidth())
+        setPanelWidth(getPanelMaxWidth());
+    };
+    window.addEventListener("resize", clampPanelWidth);
+    return () => window.removeEventListener("resize", clampPanelWidth);
+  }, [panelWidth]);
   const drag = React.useRef(null);
   const startResize = (e) => {
     drag.current = { x: e.clientX, width: panelWidth };
@@ -376,6 +394,13 @@ export default function DesignPanel({
             ) : panelMode === "property" ? (
               <>
               <PropertyOptions
+                unit={plan.property?.unit || "m"}
+                onUnitChange={(unit) =>
+                  mutate((p) => ({
+                    ...p,
+                    property: { ...p.property, unit },
+                  }))
+                }
                 carpetArea={carpetArea}
                 isCustom={isCustomCarpetArea}
                 isStatic={isStatic}
@@ -450,7 +475,11 @@ export default function DesignPanel({
                           : "up";
                     const field = (
                       <Field
-                        label={key.replace(/([A-Z])/g, " $1")}
+                        label={key === "heightM" ? "Mounting height" : key.replace(/([A-Z])/g, " $1")}
+                        measurement={[
+                          "x", "z", "width", "depth", "height", "radius", "heightM",
+                          "x1", "x2", "z1", "z2", "offset", "sillHeight",
+                        ].includes(key) ? "length" : undefined}
                         value={obj[key] ?? ""}
                         type={
                           [
@@ -541,12 +570,14 @@ export default function DesignPanel({
                     <Field
                       label="X (left edge)"
                       type="number"
+                      measurement="length"
                       value={Math.min(...obj.points.map((q) => q.x))}
                       onChange={(v) => moveBoundaryTo(obj.id, "x", v)}
                     />
                     <Field
                       label="Z (top edge)"
                       type="number"
+                      measurement="length"
                       value={Math.min(...obj.points.map((q) => q.z))}
                       onChange={(v) => moveBoundaryTo(obj.id, "z", v)}
                     />
@@ -622,6 +653,7 @@ export default function DesignPanel({
                           <Field
                             label="X"
                             type="number"
+                            measurement="length"
                             value={vertex.x}
                             onChange={(value) =>
                               patchObj(
@@ -637,6 +669,7 @@ export default function DesignPanel({
                           <Field
                             label="Z"
                             type="number"
+                            measurement="length"
                             value={vertex.z}
                             onChange={(value) =>
                               patchObj(
@@ -660,7 +693,7 @@ export default function DesignPanel({
                 )}
                 {selected.type === "room" && (
                   <div className="mini-stat">
-                    Area: {areaOf(obj).toFixed(2)} m²
+                    Area: {formatArea(areaOf(obj), unit, 2)}
                   </div>
                 )}
                 {selected.type === "room" && (

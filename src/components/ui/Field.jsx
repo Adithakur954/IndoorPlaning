@@ -1,4 +1,14 @@
 import React, { useEffect, useState } from "react";
+import {
+  areaUnitFor,
+  metresToUnit,
+  densityPerSquareMetreToUnit,
+  densityPerUnitToSquareMetre,
+  squareMetresToUnit,
+  unitToMetres,
+  unitToSquareMetres,
+  useMeasurementUnit,
+} from "../../utils/measurementUnits.jsx";
 
 export default Field;
 
@@ -36,10 +46,66 @@ function Field({
   min,
   options,
   optionLabels, // optional { value: text shown } for the options
+  measurement = null,
 }) {
+  const unit = useMeasurementUnit();
+  const isLength = type === "number" && (measurement === "length" || /\(m\)$/.test(label));
+  const isArea = type === "number" && (measurement === "area" || /\(m²\)$/.test(label));
+  const isDensity = type === "number" && measurement === "density";
+  const displayValue = (value) =>
+    value === "" || value == null
+      ? value
+      : isLength
+        ? metresToUnit(value, unit)
+        : isArea
+          ? squareMetresToUnit(value, unit)
+          : isDensity
+            ? densityPerSquareMetreToUnit(value, unit)
+          : value;
+  const displayMin =
+    min == null
+      ? min
+      : isLength
+        ? metresToUnit(min, unit)
+        : isArea
+          ? squareMetresToUnit(min, unit)
+          : isDensity
+            ? densityPerSquareMetreToUnit(min, unit)
+          : min;
+  const displayStep =
+    step === "any"
+      ? step
+      : isLength
+        ? metresToUnit(step, unit)
+        : isArea
+          ? squareMetresToUnit(step, unit)
+          : isDensity
+            ? densityPerSquareMetreToUnit(step, unit)
+          : step;
+  const displayLabel = isLength
+    ? /\(m\)$/.test(label)
+      ? label.replace(/\(m\)$/, `(${unit})`)
+      : `${label} (${unit})`
+    : isArea
+      ? /\(m²\)$/.test(label)
+        ? label.replace(/\(m²\)$/, `(${areaUnitFor(unit)}²)`)
+        : `${label} (${areaUnitFor(unit)}²)`
+      : isDensity
+        ? label.replace(/m²/g, `${areaUnitFor(unit)}²`)
+        : label;
+  const handleChange = (value) =>
+    onChange(
+      isLength
+        ? unitToMetres(value, unit)
+        : isArea
+          ? unitToSquareMetres(value, unit)
+          : isDensity
+            ? densityPerUnitToSquareMetre(value, unit)
+          : value,
+    );
   return (
     <label className="field">
-      <span>{label}</span>
+      <span>{displayLabel}</span>
       {options ? (
         <select value={value ?? ""} onChange={(e) => onChange(e.target.value)}>
           {options.map((o) => (
@@ -49,7 +115,12 @@ function Field({
           ))}
         </select>
       ) : type === "number" ? (
-        <NumberInput value={value} onChange={onChange} step={step} min={min} />
+        <NumberInput
+          value={displayValue(value)}
+          onChange={handleChange}
+          step={displayStep}
+          min={displayMin}
+        />
       ) : (
         <input
           type={type}

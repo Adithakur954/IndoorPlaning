@@ -76,6 +76,7 @@ import {
 import { DEFAULT_LEGEND_SECTIONS } from "../components/planner/MapLegend.jsx";
 import PropertyMenu from "../components/planner/PropertyMenu.jsx";
 import WorkspaceFooter from "../components/planner/WorkspaceFooter.jsx";
+import { MeasurementUnitProvider } from "../utils/measurementUnits.jsx";
 
 // heights for a newly placed source come from Network & RF (plan.rf)
 const defaultSource = (kind, p, floorId, rf = {}) => ({
@@ -164,6 +165,7 @@ export default function PlannerPage() {
     [tool, setTool] = useState("select"),
     [selected, setSelected] = useState(null),
     [panelMode, setPanelMode] = useState("selection"),
+    [sidebarExpanded, setSidebarExpanded] = useState(false),
     [expandedFloorId, setExpandedFloorId] = useState(null),
     [snap, setSnap] = useState(true),
     [showRoomNames, setShowRoomNames] = useState(true),
@@ -1698,6 +1700,7 @@ Cancel: ${what} of the optimised design instead.`,
     collisionFocus,
   ]);
   const cableDesign = useCableOverlay(plan, showCables);
+  const measurementUnit = plan.property?.unit || "m";
   const panelProps = {
     tool,
     setTool,
@@ -1873,14 +1876,26 @@ Cancel: ${what} of the optimised design instead.`,
   if (!project)
     return <div className="empty">{message || "Loading project..."}</div>;
   return (
+    <MeasurementUnitProvider unit={measurementUnit}>
     <div className="app">
       <div className="workspace">
-        <aside className="sidebar">
+        <aside className={`sidebar ${sidebarExpanded ? "sidebar-expanded" : ""}`}>
           <div className="sidebar-project">
+            <button
+              className="sidebar-collapse-toggle"
+              type="button"
+              aria-label={sidebarExpanded ? "Collapse sidebar" : "Expand sidebar"}
+              aria-expanded={sidebarExpanded}
+              title={sidebarExpanded ? "Collapse sidebar" : "Expand sidebar"}
+              onClick={() => setSidebarExpanded((expanded) => !expanded)}
+            >
+              <span aria-hidden="true">{sidebarExpanded ? "‹" : "›"}</span>
+            </button>
             <button
               className="sidebar-back-button"
               onClick={back}
               aria-label="Back to projects"
+              title="Back to projects"
             >
               <span aria-hidden="true">&#x2190;</span> Projects
             </button>
@@ -1905,6 +1920,8 @@ Cancel: ${what} of the optimised design instead.`,
                 key={id}
                 className={tab === id ? "active" : ""}
                 onClick={() => setTab(id)}
+                aria-label={label}
+                title={label}
               >
                 <span>{icon}</span>
                 {label}
@@ -1930,6 +1947,8 @@ Cancel: ${what} of the optimised design instead.`,
                   >
                     <button
                       className="floor-select"
+                      aria-label={`Select floor ${f.name}`}
+                      title={f.name}
                       onClick={() => {
                         mutate((p) => ({ ...p, selectedFloorId: f.id }));
                         setSelected(null);
@@ -2004,7 +2023,6 @@ Cancel: ${what} of the optimised design instead.`,
         <div className="workspace-content">
           {tab === "design" && (
             <header className="topbar editor-header">
-              <strong className="editor-header-title">Editor</strong>
               <EditorQuickTools tool={tool} setTool={setTool} />
               <EditorMenu
                 active={panelMode === "tools"}
@@ -2159,13 +2177,6 @@ Cancel: ${what} of the optimised design instead.`,
                   <path d="M9 18v-4M12 18v-7M15 18v-5" />
                 </svg>
               </button>
-              <div className="top-actions">
-                <span
-                  className={`save-state ${saveState === "Save failed" ? "error" : ""}`}
-                >
-                  {saveState}
-                </span>
-              </div>
             </header>
           )}
           <main className={`main ${tab === "design" ? "main-editor" : ""}`}>
@@ -2202,6 +2213,7 @@ Cancel: ${what} of the optimised design instead.`,
         floorName={plan.floors.find((f) => f.id === floorId)?.name}
         rooms={rooms.length}
         area={totalArea}
+        unit={measurementUnit}
         sources={sources.length}
         saveState={saveState}
         onUndo={undo}
@@ -2215,5 +2227,6 @@ Cancel: ${what} of the optimised design instead.`,
       />
       )}
     </div>
+    </MeasurementUnitProvider>
   );
 }
