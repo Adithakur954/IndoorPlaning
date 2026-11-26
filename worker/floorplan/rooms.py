@@ -125,6 +125,49 @@ def drop_isolated_fragments(walls: list[Wall], tol: float, max_len: float) -> tu
     return keep, dropped
 
 
+def main_network_bounds(walls: list[Wall], tol: float,
+                        min_share: float = 0.05) -> tuple[float, float, float, float] | None:
+    """Bounding box (x0, x1, y0, y1) of the building's walls: the connected wall
+    network with the most wall length, plus every other network that holds at
+    least `min_share` of that length and overlaps its box. Title blocks, legends
+    and the sheet frame are separate, smaller networks and are left out."""
+    n = len(walls)
+    if n == 0:
+        return None
+    lines = [LineString([w.a, w.b]) for w in walls]
+    parent = list(range(n))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if lines[i].distance(lines[j]) <= tol:
+                parent[find(i)] = find(j)
+    groups: dict[int, list[int]] = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(i)
+
+    def box(idx):
+        xs = [c for i in idx for c in (walls[i].a[0], walls[i].b[0])]
+        ys = [c for i in idx for c in (walls[i].a[1], walls[i].b[1])]
+        return min(xs), max(xs), min(ys), max(ys)
+
+    total = {g: sum(walls[i].length for i in idx) for g, idx in groups.items()}
+    main = max(total, key=total.get)
+    x0, x1, y0, y1 = box(groups[main])
+    for g, idx in groups.items():
+        if g == main or total[g] < min_share * total[main]:
+            continue
+        bx0, bx1, by0, by1 = box(idx)
+        if bx1 >= x0 and bx0 <= x1 and by1 >= y0 and by0 <= y1:
+            x0, x1, y0, y1 = min(x0, bx0), max(x1, bx1), min(y0, by0), max(y1, by1)
+    return x0, x1, y0, y1
+
+
 def drop_small_networks(walls: list[Wall], tol: float, min_total_len: float,
                         anchored: set[int] | None = None) -> tuple[list[Wall], int]:
     """Walls form connected networks. A network that adds up to less than

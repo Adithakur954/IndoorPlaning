@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from sionna_worker.optimizer import Problem, breakdown, select
+from sionna_worker.optimizer import Problem, breakdown, deficit_priority, range_separation, select
 
 
 def problem(sets, n, weight=None, base=None, allowed=None, k=1, positions=None, min_sep=0.0):
@@ -116,6 +116,59 @@ class BreakdownTest(unittest.TestCase):
         out = breakdown(p, counts, groups, 2)
         self.assertAlmostEqual(out[0]["coveragePct"], 100.0)
         self.assertAlmostEqual(out[1]["coveragePct"], 0.0)
+
+
+
+class WorstFirstTest(unittest.TestCase):
+    def test_red_area_is_fixed_before_a_nearly_good_one(self):
+        # AP 0 covers 5 cells that are just short of the threshold (-76 dBm); AP 1 covers 4 red cells (-95 dBm).
+        # By plain area AP 0 wins; worst first, with one AP allowed, the red area is fixed.
+        current = np.array([-76.0] * 5 + [-95.0] * 4)
+        p = Problem(hit=np.array([[1] * 5 + [0] * 4, [0] * 5 + [1] * 4], dtype=bool), weight=np.ones(9),
+                    base_count=np.zeros(9, dtype=int), allowed=np.ones(2, dtype=bool),
+                    positions=np.array([[0, 0, 3], [50, 0, 3]], dtype=float),
+                    priority=deficit_priority(current, np.full(9, -75.0)))
+        s = select(p, target_pct=None, budget=1)
+        self.assertEqual(s.indices, [1])
+
+    def test_good_areas_are_worth_nothing(self):
+        # cells 0-3 are already covered by a fixed AP: an AP that only adds signal there is never chosen
+        p = problem([[0, 1, 2, 3], [4]], 5, base=[1, 1, 1, 1, 0])
+        s = select(p, target_pct=100)
+        self.assertEqual(s.indices, [1])
+
+    def test_the_ap_limit_holds_when_aiming_for_a_target(self):
+        p = problem([[0], [1], [2], [3]], 4)
+        s = select(p, target_pct=100, budget=2)
+        self.assertEqual(len(s.indices), 2)
+        self.assertEqual(s.status, "budget-exhausted")
+
+    def test_spacing_follows_the_range(self):
+        # each candidate covers 314 cells of 1 m2: radius 10 m, so APs keep 5 m apart (more than the 3 m setting)
+        hit = np.zeros((3, 400), dtype=bool)
+        hit[:, :314] = True
+        self.assertAlmostEqual(range_separation(hit, 1.0, 3.0), 5.0, places=1)
+        self.assertEqual(range_separation(hit[:, :10], 1.0, 3.0), 3.0)
+
+
+class UsefulGainTest(unittest.TestCase):
+    def sets(self):
+        # 200 cells: two APs cover 190 of them; ten more APs would each add one cell (0.5 %)
+        return [list(range(0, 100)), list(range(100, 190))] + [[190 + i] for i in range(10)]
+
+    def test_a_big_budget_is_a_maximum_not_a_quota(self):
+        p = problem(self.sets(), 200)
+        s = select(p, target_pct=None, budget=50, min_gain_pct=1.0)
+        self.assertEqual(sorted(s.indices), [0, 1])
+        self.assertEqual(s.status, "low-gain")
+
+    def test_target_shortfall_is_counted_not_filled_with_crumbs(self):
+        p = problem(self.sets(), 200)
+        s = select(p, target_pct=100, min_gain_pct=1.0)
+        self.assertEqual(sorted(s.indices), [0, 1])
+        self.assertEqual(s.status, "low-gain")
+        self.assertEqual(s.more_needed, 10)
+        self.assertAlmostEqual(s.more_reach_pct, 100.0)
 
 
 if __name__ == "__main__":

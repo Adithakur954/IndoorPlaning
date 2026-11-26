@@ -242,3 +242,46 @@ export function shiftRoomContents(plan, room, dx, dz) {
     rooms: plan.rooms.map((x) => (r.has(x.id) ? movePolygon(x, dx, dz) : x)),
   };
 }
+
+// Length label data for every edge of a shape: the edge midpoint, a text angle
+// that never reads upside down, and the unit normal pointing into the shape
+// (for an open polyline such as a wall: the left side).
+export function edgeMeasures(points, closed = true) {
+  const pts = points.map((p) => ({ x: Number(p.x), z: Number(p.z) }));
+  const n = pts.length;
+  if (n < 2) return [];
+  let twiceArea = 0;
+  if (closed)
+    for (let i = 0; i < n; i++) {
+      const a = pts[i],
+        b = pts[(i + 1) % n];
+      twiceArea += a.x * b.z - b.x * a.z;
+    }
+  const inside = closed && twiceArea < 0 ? -1 : 1;
+  const out = [];
+  for (let i = 0; i < (closed ? n : n - 1); i++) {
+    const a = pts[i],
+      b = pts[(i + 1) % n],
+      dx = b.x - a.x,
+      dz = b.z - a.z,
+      length = Math.hypot(dx, dz);
+    if (!(length > 1e-6)) continue;
+    let angleDeg = (Math.atan2(dz, dx) * 180) / Math.PI;
+    if (angleDeg > 90) angleDeg -= 180;
+    else if (angleDeg <= -90) angleDeg += 180;
+    out.push({
+      index: i,
+      a,
+      b,
+      length,
+      mid: { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 },
+      angleDeg,
+      inward: { x: (-dz / length) * inside, z: (dx / length) * inside },
+    });
+  }
+  return out;
+}
+
+// "4.50 m" below 10 m, "12.3 m" above
+export const formatMetres = (m) =>
+  `${Number(m).toFixed(Math.abs(m) < 10 ? 2 : 1)} m`;

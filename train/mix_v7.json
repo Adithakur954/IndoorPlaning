@@ -1,0 +1,18 @@
+{
+  "name": "v7 mix: dataset_v4 (25 %) + dataset_v6 (35 %) + run 7 hard cases dataset_v7 (40 %)",
+  "classes": ["background", "wall", "door", "window", "floor", "column", "ap",
+              "desk", "chair", "table", "sofa", "plant", "pod", "storage", "stairs", "void"],
+  "sources": [
+    {"root": "dataset_v4", "share": 0.25, "extra_damage": 0.6, "lines": "from_mask",
+     "note": "read in place, never changed (the old base: clean offices)"},
+    {"root": "dataset_v6", "share": 0.35, "extra_damage": 0.0, "lines": "file",
+     "note": "run 6 hard cases (RF exports, voids, low resolution), read in place"},
+    {"root": "dataset_v7", "share": 0.40, "extra_damage": 0.0, "lines": "file",
+     "note": "run 7 hard cases (make_dataset_v7.py): RF wall overlays, machinery / racks / conveyors, gang-ways, solid equipment blocks, thick grey outer walls, site kerbs / roads / tanks, stretched and 4-10 px per metre pictures; everything added is NOT wall except the grey outer band"}
+  ],
+  "eval": {
+    "val": "all three sources, reported separately and together",
+    "test": "all three sources; plus the user's real drawings (factory, RF office, theatre) as an unlabelled visual check until a hand-labelled real set exists"
+  },
+  "not_started": "built and previewed only; training waits for the user's go-ahead"
+}

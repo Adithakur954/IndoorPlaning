@@ -1,0 +1,23 @@
+[package]
+name = "capacity-core"
+version = "0.1.0"
+edition = "2021"
+description = "Wi-Fi capacity engine (deterministic and Monte Carlo). One crate, used by the planner as WebAssembly and by the Rust service natively."
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# float_roundtrip: parse numbers exactly like JavaScript's JSON.parse, so the
+# engine sees the same values the planner holds.
+serde_json = { version = "1", features = ["float_roundtrip"] }
+# fdlibm-derived maths, identical on every target (native and wasm32).
+libm = "0.2"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

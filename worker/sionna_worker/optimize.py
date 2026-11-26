@@ -22,13 +22,33 @@ import psutil
 
 from .grid import COMMON_AREA, OUTSIDE, FloorGrid, Targets, build_grids, classify
 from .job import JobError, OptimizeJob, band_of
-from .optimizer import Problem, breakdown, select
+from . import apsearch
+from .optimizer import Problem, breakdown, deficit_priority, range_separation, select
 from .runtime import select_backend
 from .version import model_info, model_version
 from .simulate import FLOOR_DBM, _gpu_memory_mb, apply_materials, load_export
 from .snr import ap_bandwidth_mhz, noise_floor_dbm, strongest_snr
 
 MAX_MATRIX_ELEMENTS = 150_000_000
+
+
+def replace_file(tmp: Path, target: Path, attempts: int = 20, delay: float = 0.05) -> bool:
+    """os.replace that tolerates Windows locks. On Windows the rename fails with
+    "Access is denied" while another process (the service reading progress, an
+    antivirus scan, the search indexer) has the target open. Retry for about a
+    second; if it is still locked, drop the temporary file and return False."""
+    for attempt in range(attempts):
+        try:
+            os.replace(tmp, target)
+            return True
+        except PermissionError:
+            if attempt + 1 < attempts:
+                time.sleep(delay)
+    try:
+        tmp.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return False
 
 
 class Progress:
@@ -44,9 +64,13 @@ class Progress:
             "elapsedSeconds": round(time.time() - self.started, 1),
             **extra,
         }
+        # Progress is best effort: a locked file skips this update, never fails the job.
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data), encoding="utf-8")
-        os.replace(tmp, self.path)
+        try:
+            tmp.write_text(json.dumps(data), encoding="utf-8")
+        except OSError:
+            return
+        replace_file(tmp, self.path)
 
 
 class RowCache:
@@ -92,9 +116,13 @@ class RowCache:
     def put(self, key: str, row: np.ndarray):
         self.misses += 1
         if self.dir:
+            # A row that cannot be cached (locked file) is only recomputed next time.
             tmp = self.dir / f"{key}.tmp.npy"
-            np.save(tmp, row)
-            os.replace(tmp, self.dir / f"{key}.npy")
+            try:
+                np.save(tmp, row)
+            except OSError:
+                return
+            replace_file(tmp, self.dir / f"{key}.npy")
 
     def evict(self):
         if not self.dir or not self.max_bytes:
@@ -315,30 +343,94 @@ def run_optimize(job: OptimizeJob) -> dict:
     k_all = len(candidates)
     shortlist = list(range(k_all))
     screening_info = {"performed": False}
+    # which existing APs stay as they are (their coverage is the starting point)
+    if job.existing_handling == "fixed":
+        base_idx = list(range(len(originals)))
+    elif reuse:
+        base_idx = [i for i, ap in enumerate(originals) if ap["id"] in locked_ids]
+    else:
+        base_idx = []
+    # the limit on new APs applies in every mode ("fewest APs for a target" stops at it too)
+    budget, min_count = job.budget, 0
+    if reuse:
+        # without "allow new", the chosen APs can never outnumber the unlocked ones
+        extra = (job.budget or 0) if job.allow_new_aps else 0
+        budget = len(free_aps) + extra if (not job.allow_new_aps or job.budget is not None) else None
+        min_count = min(len([a for a in free_aps if a["id"] in set(job.keep_ap_ids)]), budget if budget is not None else 10**6)
+    all_positions = np.array([[c["x"], c["z"], elevation[c["floorId"]] + c["heightM"]] for c in candidates], dtype=float)
+    prefer_all = np.array([c["kind"] == "existing" for c in candidates], dtype=bool)
+    warm_fine: list[int] = []
+    coarse_sel = None
+    engine_notes: list[str] = []
+    estimate: dict = {}
     if k_all > job.shortlist_max:
+        # ---- coarse ray tracing of EVERY position (cached), and a first search over all of them ----------------
         coarse = sim.rows(
             cand_tx, coarse_grids, job.screening_samples, job.screening_depth, freq,
             on_batch=lambda d, tot: progress.update("screening", 0.10 + 0.35 * d / max(tot, 1),
-                                                    f"Screening candidates {d}/{tot}"),
+                                                    f"Coarse ray tracing of every position {d}/{tot}"),
         )
-        c_hit = coarse >= coarse_targets.threshold[None, :]
-        w = coarse_targets.weight
-        score = (c_hit * w[None, :]).sum(axis=1) / max(w.sum(), 1e-9)
-        # existing APs always stay in the race, so each can be kept as it is
-        keep: list[int] = list(range(k_all - len(existing_cands), k_all))
-        # every included room keeps its best few candidates so it can be reached
-        for ri in range(len(coarse_targets.room_ids)):
-            m = (coarse_targets.room_idx == ri) & (w > 0)
-            if not m.any():
-                continue
-            room_score = (c_hit[:, m] * w[m][None, :]).sum(axis=1)
-            keep += [int(i) for i in np.argsort(-room_score)[: job.shortlist_per_room] if room_score[i] > 0]
-        if job.include_common_area:
-            m = (coarse_targets.room_idx == COMMON_AREA) & (w > 0)
-            if m.any():
-                cs = (c_hit[:, m] * w[m][None, :]).sum(axis=1)
-                keep += [int(i) for i in np.argsort(-cs)[: job.shortlist_per_room] if cs[i] > 0]
-        limit = min(job.shortlist_max, max(1, MAX_MATRIX_ELEMENTS // max(n, 1)))
+        c_thr = coarse_targets.threshold
+        c_hit = coarse >= c_thr[None, :]
+        coarse_orig = np.full((len(originals), coarse_targets.n), FLOOR_DBM, np.float32)
+        for f, idx in by_freq.items():
+            txs = [{"position": list(originals[i]["position"]),
+                    "eirpDbm": float(originals[i]["txPowerDbm"]) + float(originals[i].get("antennaGainDbi") or 0)}
+                   for i in idx]
+            coarse_orig[idx] = sim.rows(txs, coarse_grids, job.screening_samples, job.screening_depth, f)
+        # worst first: priority from the CURRENT signal of your APs (as on the map), unless they are ignored
+        coarse_current = (coarse_orig.max(axis=0) if len(originals) and job.existing_handling != "ignore"
+                          else np.full(coarse_targets.n, FLOOR_DBM, np.float32))
+        c_base = ((coarse_orig[base_idx] >= c_thr[None, :]).sum(axis=0).astype(np.int32) if base_idx
+                  else np.zeros(coarse_targets.n, dtype=np.int32))
+        c_sep = range_separation(c_hit, coarse_res ** 2, job.min_ap_separation_m)
+        c_problem = Problem(
+            hit=c_hit, weight=coarse_targets.weight, base_count=c_base,
+            allowed=np.ones(k_all, dtype=bool), positions=all_positions, k=job.redundancy,
+            min_separation_m=c_sep, prefer=prefer_all,
+            priority=deficit_priority(coarse_current, c_thr),
+        )
+        progress.update("screening", 0.46, "Searching all positions (coarse)")
+        coarse_sel, coarse_engine = apsearch.run(
+            c_problem, target_pct=job.target_coverage_pct, budget=budget, min_gain_pct=job.min_ap_gain_pct,
+            min_count=min_count, seed=job.seed)
+        engine_notes.append(f"coarse pass over all {k_all} positions: {coarse_engine}")
+        # how many APs the requirement needs, from what one AP really covers here (not a circle)
+        areas = c_hit[:, coarse_targets.weight > 0].sum(axis=1) * coarse_res ** 2
+        typical = float(np.median(areas[areas > 0])) if (areas > 0).any() else 0.0
+        target_area = float((coarse_targets.weight > 0).sum() * coarse_res ** 2)
+        estimate = {
+            "typicalApCoverageM2": round(typical, 1),
+            "targetAreaM2": round(target_area, 1),
+            "coverageApsNeeded": len(coarse_sel.indices) + int(coarse_sel.more_needed or 0),
+            "bestAchievableAllPositionsPct": round(coarse_sel.max_possible_pct, 2),
+        }
+        # ---- refinement: full-accuracy ray tracing where it matters -------------------------------------------
+        # the chosen spots and their close alternatives, the best positions of every weak zone that is left,
+        # and your existing APs; then the worst-first ranking fills the rest
+        keep: list[int] = list(range(k_all - len(existing_cands), k_all)) + list(coarse_sel.indices)
+        for s_i in coarse_sel.indices:
+            d = np.linalg.norm(all_positions - all_positions[s_i], axis=1)
+            keep += [int(j) for j in np.argsort(d)[1:9] if d[j] <= max(2 * c_sep, 6.0)]
+        from scipy import ndimage
+
+        c_counts = c_base + (c_hit[coarse_sel.indices].sum(axis=0) if coarse_sel.indices else 0)
+        w_pri = coarse_targets.weight * deficit_priority(coarse_current, c_thr)
+        weak_cells = (coarse_targets.weight > 0) & (c_counts < job.redundancy)
+        for g in coarse_grids:
+            sl = slice(g.offset, g.offset + g.cells)
+            labels, count = ndimage.label(weak_cells[sl].reshape(g.ny, g.nx))
+            sizes = ndimage.sum(np.ones_like(labels), labels, index=range(1, count + 1)) if count else []
+            for lab in [int(i) + 1 for i in np.argsort(-np.asarray(sizes))[:16]]:
+                zone = np.zeros(coarse_targets.n, dtype=bool)
+                zone[sl] = (labels == lab).ravel()
+                if zone.sum() < 3:
+                    continue
+                zs = (c_hit[:, zone] * w_pri[zone][None, :]).sum(axis=1)
+                keep += [int(i) for i in np.argsort(-zs)[:4] if zs[i] > 0]
+        score = (c_hit * w_pri[None, :]).sum(axis=1)
+        limit = min(max(job.shortlist_max, 12 * len(coarse_sel.indices) + len(existing_cands)),
+                    max(1, MAX_MATRIX_ELEMENTS // max(n, 1)))
         seen = set()
         shortlist = []
         for i in keep + [int(i) for i in np.argsort(-score)]:
@@ -347,54 +439,64 @@ def run_optimize(job: OptimizeJob) -> dict:
                 shortlist.append(i)
             if len(shortlist) >= limit:
                 break
+        position_of = {c_i: f_i for f_i, c_i in enumerate(shortlist)}
+        warm_fine = [position_of[i] for i in coarse_sel.indices if i in position_of]
         screening_info = {
             "performed": True, "gridResolutionM": coarse_res, "samplesPerTx": job.screening_samples,
             "rayDepth": job.screening_depth, "candidates": k_all, "shortlisted": len(shortlist),
-            "method": "coarse Sionna RT (approximate, used for ranking only)",
+            "method": ("coarse Sionna RT of every position; a first search over all of them; full ray tracing of "
+                       "the chosen spots, their close alternatives and the best positions of every remaining "
+                       "weak zone"),
         }
     timings["screening"] = time.time() - t
     peak_rss = max(peak_rss, process.memory_info().rss / 1e6)
 
-    # ---- Stage C: final ray tracing of the shortlist ----------------------
+    # ---- Stage C: full ray tracing of the refined positions -------------------
     t = time.time()
     matrix = sim.rows(
         [cand_tx[i] for i in shortlist], grids, job.samples_per_tx, job.max_depth, freq,
-        on_batch=lambda d, tot: progress.update("simulation", 0.45 + 0.45 * d / max(tot, 1),
-                                                f"Ray tracing shortlist {d}/{tot}"),
+        on_batch=lambda d, tot: progress.update("simulation", 0.50 + 0.40 * d / max(tot, 1),
+                                                f"Full ray tracing {d}/{tot}"),
     )
     timings["simulation"] = time.time() - t
     peak_rss = max(peak_rss, process.memory_info().rss / 1e6)
 
-    # ---- Stage D: optimisation ---------------------------------------------
+    # ---- Stage D: the final search on full-accuracy coverage ------------------
     t = time.time()
     progress.update("optimize", 0.90, "Selecting access points")
     thr = targets.threshold
     hit = matrix >= thr[None, :]
     orig_hit = orig_rows >= thr[None, :] if len(originals) else np.zeros((0, n), dtype=bool)
     orig_count = orig_hit.sum(axis=0).astype(np.int32)
-    if job.existing_handling == "fixed":
-        base_idx = list(range(len(originals)))
-    elif reuse:
-        base_idx = [i for i, ap in enumerate(originals) if ap["id"] in locked_ids]
-    else:
-        base_idx = []
     base_count = orig_hit[base_idx].sum(axis=0).astype(np.int32) if base_idx else np.zeros(n, dtype=np.int32)
     base_dbm = orig_rows[base_idx].max(axis=0).astype(np.float32) if base_idx else np.full(n, FLOOR_DBM, np.float32)
-    positions = np.array([[candidates[i]["x"], candidates[i]["z"], elevation[candidates[i]["floorId"]] + candidates[i]["heightM"]]
-                          for i in shortlist], dtype=float)
+    positions = all_positions[shortlist]
+    # Worst first: a cell's priority grows with how far its CURRENT signal (your existing APs, as on the map) is
+    # below the threshold, so APs go to the red areas before the nearly-good ones.
+    current_dbm = (orig_rows.max(axis=0) if len(originals) and job.existing_handling != "ignore"
+                   else np.full(n, FLOOR_DBM, np.float32))
+    priority = deficit_priority(current_dbm, thr)
+    # APs keep a distance that follows their range (half the radius one AP covers), never under the setting
+    separation = range_separation(hit, job.resolution_m ** 2, job.min_ap_separation_m)
     problem = Problem(
         hit=hit, weight=targets.weight, base_count=base_count,
         allowed=np.ones(len(shortlist), dtype=bool), positions=positions,
-        k=job.redundancy, min_separation_m=job.min_ap_separation_m,
-        prefer=np.array([candidates[i]["kind"] == "existing" for i in shortlist], dtype=bool),
+        k=job.redundancy, min_separation_m=separation,
+        prefer=prefer_all[shortlist],
+        priority=priority,
     )
-    budget, min_count = job.budget, 0
-    if reuse:
-        # without "allow new", the chosen APs can never outnumber the unlocked ones
-        extra = (job.budget or 0) if job.allow_new_aps else 0
-        budget = len(free_aps) + extra if (not job.allow_new_aps or job.target_coverage_pct is None) else None
-        min_count = min(len([a for a in free_aps if a["id"] in set(job.keep_ap_ids)]), budget if budget is not None else 10**6)
-    selection = select(problem, job.target_coverage_pct, budget, min_count=min_count)
+    selection, final_engine = apsearch.run(
+        problem, target_pct=job.target_coverage_pct, budget=budget, min_gain_pct=job.min_ap_gain_pct,
+        min_count=min_count, warm=warm_fine, seed=job.seed)
+    engine_notes.append(f"final pass on full ray tracing: {final_engine}")
+    if coarse_sel is not None:
+        # "not achievable" is judged over ALL positions (coarse), not only the refined ones
+        selection.max_possible_pct = max(selection.max_possible_pct, coarse_sel.max_possible_pct)
+        if (selection.status == "infeasible" and job.target_coverage_pct is not None
+                and coarse_sel.max_possible_pct >= job.target_coverage_pct - 1e-9):
+            selection.status = "low-gain"
+        if selection.more_needed is None and coarse_sel.more_needed is not None and selection.status == "low-gain":
+            selection.more_needed, selection.more_reach_pct = coarse_sel.more_needed, coarse_sel.more_reach_pct
     final_counts = base_count + problem.hit[selection.indices].sum(axis=0) if selection.indices else base_count
     before_counts = orig_count
     timings["optimization"] = time.time() - t
@@ -525,6 +627,9 @@ def run_optimize(job: OptimizeJob) -> dict:
                              + new_count) if reuse else (
                 (len(originals) if job.existing_handling == "fixed" else 0) + new_count),
             "message": _message(job, selection, len(originals), counts_by_action, new_count, before_counts, problem)
+            + ("" if selection.status == "target-met" else _estimate_note(job, estimate, budget))
+            + (f" Note: {job.threshold_dbm} dBm is a strict signal requirement and needs many more APs than the "
+               "usual -67 dBm for data (-65 dBm for voice)." if job.threshold_dbm > -60 else "")
             + _comparison_note(problem.coverage_pct(before_counts), selection_pct := problem.coverage_pct(final_counts),
                                len(originals), ignored_other_band),
             "beforeCoveragePct": problem.coverage_pct(before_counts),
@@ -540,6 +645,8 @@ def run_optimize(job: OptimizeJob) -> dict:
             "supplied": len(job.candidates), "existingAddedAsCandidates": len(existing_cands),
             "shortlisted": len(shortlist), "screening": screening_info,
         },
+        # how the layout was chosen and what the requirement needs on this floor
+        "search": {"engine": engine_notes, "estimate": estimate},
         "existingAps": [{"id": ap["id"], "name": ap["name"], "floorId": ap["floorId"]} for ap in originals],
         "existingActions": actions,
         "ignoredOtherBandAps": ignored_other_band,
@@ -561,6 +668,10 @@ def run_optimize(job: OptimizeJob) -> dict:
         },
         "assumptions": [
             "Coverage means at least " + str(job.redundancy) + " AP(s) reach the threshold at the receiver height; powers of different APs are never added.",
+            "Worst areas first: an area counts more the further its current signal is below the threshold (red before "
+            "yellow); areas already at the threshold count for nothing, so no AP is added only to make good areas better.",
+            f"New APs keep at least {separation:.1f} m apart (half the range one AP covers, never under "
+            f"{job.min_ap_separation_m} m), so they cannot pile up in one spot.",
             "Isotropic radiation with the AP's antenna gain added as EIRP; no antenna pattern, fading, people or unmodelled furniture.",
             "ITU-R P.2040 materials with assumed thicknesses; uncalibrated, so treat results as estimates.",
             "Candidates are simulated independently; co-channel interference and channel reuse are not modelled.",
@@ -648,9 +759,33 @@ def _message(job: OptimizeJob, sel, n_existing: int, acts=None, new=None, before
                 f"the best achievable is {sel.max_possible_pct:.1f}%. Add candidates (other mounting types, "
                 "relax exclusions) or lower the threshold or target.")
     if sel.status == "budget-exhausted":
-        return f"The budget of {job.budget} new AP(s) gives {sel.coverage_pct:.1f}% (target {job.target_coverage_pct}%)."
+        if job.target_coverage_pct is None:
+            return f"Your limit of {job.budget} new AP(s), placed worst areas first, gives {sel.coverage_pct:.1f}% coverage."
+        return (f"Your limit of {job.budget} new AP(s) gives {sel.coverage_pct:.1f}%: not enough for the target "
+                f"{job.target_coverage_pct}%. Allow more APs to reach it.")
+    if sel.status == "low-gain":
+        head = (f"{new} new AP(s) give {sel.coverage_pct:.1f}%; another AP would add under {job.min_ap_gain_pct:g}% "
+                f"coverage, so none was added")
+        if job.budget is not None and job.budget > new:
+            head += f" ({job.budget - new} of your {job.budget} allowed were not needed)"
+        if job.target_coverage_pct is not None and sel.coverage_pct < job.target_coverage_pct - 1e-9 and sel.more_needed:
+            head += (f". Reaching the target {job.target_coverage_pct}% would take {sel.more_needed} more AP(s), each "
+                     f"adding under {job.min_ap_gain_pct:g}% (about {sel.more_reach_pct:.1f}% in total)")
+        return head + "."
     return (f"No further candidate improves coverage; {new} new AP(s) give {sel.coverage_pct:.1f}%. "
             f"The best achievable with these candidates is {sel.max_possible_pct:.1f}%.")
+
+
+def _estimate_note(job: OptimizeJob, estimate: dict, budget) -> str:
+    """What the requirement needs on this floor, from what one AP really covers here."""
+    need = estimate.get("coverageApsNeeded")
+    if not need:
+        return ""
+    note = (f" Reaching it needs about {need} AP(s) on this floor (one AP covers about "
+            f"{estimate['typicalApCoverageM2']:.0f} m² at {job.threshold_dbm} dBm here")
+    if budget is not None and need > budget:
+        note += f"; your limit is {budget}"
+    return note + ")."
 
 
 def _comparison_note(before_pct: float, after_pct: float, n_existing: int, ignored_other_band) -> str:

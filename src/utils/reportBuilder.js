@@ -65,6 +65,7 @@ export async function buildReport({
   snrRanges = [], // colour bands of the SNR KPI (dB)
   snrTargetDb = DEFAULT_SNR_TARGET_DB,
   onProgress = () => {},
+  designLabel = null, // e.g. "Optimised design from the optimiser (not applied to the plan)"
 }) {
   if (!rt?.jobId || !rt.result?.floors?.length)
     throw Error("Run a prediction first: the report is built from its result.");
@@ -172,6 +173,7 @@ export async function buildReport({
       ["Floors", plan.floors.map((f) => f.name).join(", ")],
       ["Wi-Fi access points", String(wifi.length)],
       ["Bands predicted", bands.map((b) => bandName(b.band)).join(", ")],
+      ...(designLabel ? [["Design", designLabel]] : []),
       ["Prediction run", rt.finishedAt ? new Date(rt.finishedAt).toLocaleString() : "saved run"],
       ["Report generated", now.toLocaleString()],
     ],
@@ -433,6 +435,35 @@ export async function buildReport({
   for (const a of rt.result.assumptions || []) doc.bullet(a);
   if (!plan.doors.length && !plan.windows.length)
     doc.note("No doors or windows are drawn in this project, so walls are modelled as solid.", "missing");
+
+  // ---- 3D views (one page per floor): the building, and the building with the predicted signal ------------
+  // Drawn off-screen with their own camera framed on the floor (src/utils/report3d.js), never a screenshot.
+  {
+    const { render3dImage } = await import("./report3d.js");
+    const put3d = (out, alt) => {
+      if (out) doc.image(out.bytes, out.width, out.height, alt);
+      else doc.paragraph("(the 3D view needs WebGL, which this computer's browser does not offer)", { italic: true });
+    };
+    for (const f of plan.floors) {
+      if (!areasOf(f.id).length) continue;
+      onProgress(`3D view of ${f.name}`);
+      doc.pageBreak();
+      doc.heading(`${f.name}: 3D view`, 2);
+      const aps3d = plan.sources
+        .filter((s) => s.kind === "wifi" && s.floorId === f.id)
+        .map((s) => ({ name: shortName(s.name), x: s.x, z: s.z, heightM: s.heightM, color: s.origin === "optimized" ? "#dc2626" : "#7c3aed" }));
+      put3d(await render3dImage({ plan, floorId: f.id, aps: aps3d, title: `${f.name} · 3D view: rooms, walls and access points` }), `3D view of ${f.name}`);
+      const fl = ref.floors.find((x) => x.floorId === f.id);
+      if (fl) {
+        doc.pageBreak();
+        doc.heading(`${f.name}: 3D view with the predicted signal`, 2);
+        put3d(await render3dImage({
+          plan, floorId: f.id, aps: aps3d, cells: heatCells(fl.cells), ranges,
+          title: `${f.name} · 3D view with the predicted signal · ${bandName(ref.band)} · strongest-AP RSSI (dBm)`,
+        }), `3D view with prediction of ${f.name}`);
+      }
+    }
+  }
 
   // ====================================================================================
   // 3. Existing Wi-Fi infrastructure

@@ -1,11 +1,23 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
-import { Html, OrbitControls, Grid } from "@react-three/drei";
+import {
+  Html,
+  Line,
+  OrbitControls,
+  Grid,
+} from "@react-three/drei";
 import * as THREE from "three";
-import { pointsOf, bbox, boundaryAreas } from "../../utils/geometry.js";
+import {
+  pointsOf,
+  bbox,
+  boundaryAreas,
+  edgeMeasures,
+  formatMetres,
+} from "../../utils/geometry.js";
 import { buildWalls } from "../../utils/wallGraph.js";
 import { materialColors } from "../../config/materialColors.js";
 import { Heatmap3D } from "./SmoothHeatmap.jsx";
+import { CameraRig, NavControls, navKeyHandler } from "./Nav3D.jsx";
 import {
   getFloorLogs,
   getLogGridCells,
@@ -28,6 +40,23 @@ function Walls3D({ plan, floorId, tool, onSelect }) {
     ],
   );
   const thickness = Math.max(0.01, Number(plan.wallThickness) || 0.2);
+  // one shared material per wall material (not one per wall piece)
+  const materials = useMemo(() => {
+    const out = {};
+    for (const wall of walls) {
+      const key = materialColors[wall.material] ? wall.material : "drywall";
+      out[key] ||= new THREE.MeshStandardMaterial({
+        color: materialColors[key] || materialColors.drywall,
+        transparent: true,
+        opacity: key === "glass" ? 0.35 : 0.72,
+      });
+    }
+    return out;
+  }, [walls]);
+  useEffect(
+    () => () => Object.values(materials).forEach((m) => m.dispose()),
+    [materials],
+  );
   return (
     <group>
       {walls.flatMap((wall, wi) =>
@@ -38,6 +67,11 @@ function Walls3D({ plan, floorId, tool, onSelect }) {
           return (
             <mesh
               key={`${wi}-${piece.key}`}
+              material={
+                materials[
+                  materialColors[wall.material] ? wall.material : "drywall"
+                ]
+              }
               position={[
                 wall.a.x + (wall.b.x - wall.a.x) * ratio,
                 (piece.top + piece.bottom) / 2,
@@ -61,15 +95,72 @@ function Walls3D({ plan, floorId, tool, onSelect }) {
                   thickness,
                 ]}
               />
-              <meshStandardMaterial
-                color={materialColors[wall.material] || materialColors.drywall}
-                transparent
-                opacity={wall.material === "glass" ? 0.35 : 0.72}
-              />
             </mesh>
           );
         }),
       )}
+    </group>
+  );
+}
+// Edge lengths just above the wall tops, and each room's width x depth
+// under its name.
+function Measurements3D({ plan, floorId, rooms, walls, shown }) {
+  const labels = [];
+  const add = (key, x, y, z, text, kind = "") =>
+    labels.push({ key, position: [x, y, z], text, kind });
+  if (shown("rooms"))
+    for (const r of rooms) {
+      const h = Number(r.height) || 3;
+      const b = bbox(r);
+      add(
+        `size-${r.id}`,
+        (b.minX + b.maxX) / 2,
+        h + 0.05,
+        (b.minZ + b.maxZ) / 2,
+        r.shape === "circle"
+          ? `Ø ${formatMetres(b.maxX - b.minX)}`
+          : `${(b.maxX - b.minX).toFixed(2)} × ${formatMetres(b.maxZ - b.minZ)}`,
+        "size",
+      );
+      if (r.shape === "circle") continue;
+      for (const m of edgeMeasures(pointsOf(r)))
+        add(
+          `e-${r.id}-${m.index}`,
+          m.mid.x + m.inward.x * 0.35,
+          h + 0.15,
+          m.mid.z + m.inward.z * 0.35,
+          formatMetres(m.length),
+        );
+    }
+  if (shown("boundary"))
+    for (const b of (plan.boundaries || []).filter(
+      (x) => x.floorId === floorId && x.points?.length >= 3,
+    )) {
+      const h = Number(b.height) || 3;
+      for (const m of edgeMeasures(b.points))
+        add(
+          `b-${b.id}-${m.index}`,
+          m.mid.x - m.inward.x * 0.5,
+          h + 0.15,
+          m.mid.z - m.inward.z * 0.5,
+          formatMetres(m.length),
+          "boundary",
+        );
+    }
+  if (shown("walls"))
+    for (const w of walls) {
+      const len = Math.hypot(w.x2 - w.x1, w.z2 - w.z1);
+      if (len > 1e-6)
+        add(`w-${w.id}`, (+w.x1 + +w.x2) / 2, 3.15, (+w.z1 + +w.z2) / 2, formatMetres(len));
+    }
+  return (
+    <group>
+      {labels.map((l) => (
+        <Html key={l.key} position={l.position} center zIndexRange={[20, 0]}
+          className={`measure-3d ${l.kind}`} style={{ pointerEvents: "none" }}>
+          {l.text}
+        </Html>
+      ))}
     </group>
   );
 }
@@ -86,21 +177,32 @@ function ShapeRoom({
   wallTypes,
   showRoomNames,
   isStatic = true,
+  layer = 0, // 0 = the largest room; rooms inside it get higher numbers and draw over it
 }) {
   const group = useRef(),
     drag = useRef(null),
     { raycaster, camera, gl } = useThree();
-  const p = pointsOf(room),
-    shape = new THREE.Shape();
-  p.forEach((pt, i) =>
-    i ? shape.lineTo(pt.x, pt.z) : shape.moveTo(pt.x, pt.z),
-  );
-  shape.closePath();
-  const geometry = new THREE.ExtrudeGeometry(shape, {
-    depth: 0.08,
-    bevelEnabled: false,
-  });
-  geometry.rotateX(Math.PI / 2);
+  // build the extruded floor only when the outline changes, and free the old one
+  const outline = JSON.stringify(pointsOf(room));
+  const geometry = useMemo(() => {
+    const shape = new THREE.Shape();
+    // every outline in the same direction: an outline drawn the other way round (common in imported rooms)
+    // made the floor's top face point down, so it was lit grey-white instead of the room colour
+    let pts = JSON.parse(outline);
+    const twice = pts.reduce((t, p, i) => t + p.x * pts[(i + 1) % pts.length].z - pts[(i + 1) % pts.length].x * p.z, 0);
+    if (twice < 0) pts = [...pts].reverse();
+    pts.forEach((pt, i) =>
+      i ? shape.lineTo(pt.x, pt.z) : shape.moveTo(pt.x, pt.z),
+    );
+    shape.closePath();
+    const g = new THREE.ExtrudeGeometry(shape, {
+      depth: 0.08,
+      bevelEnabled: false,
+    });
+    g.rotateX(Math.PI / 2);
+    return g;
+  }, [outline]);
+  useEffect(() => () => geometry.dispose(), [geometry]);
   const wallHeight = Number(room.height) || 3;
   const move = (e) => {
     if (!drag.current) return;
@@ -146,10 +248,17 @@ function ShapeRoom({
           e.target.releasePointerCapture(e.pointerId);
       }}
     >
-      <mesh geometry={geometry}>
+      {/* Room floors lie on top of each other (an imported "Floor" with the rooms inside it), all at the same
+          height: the depth buffer cannot decide between them and they took turns while the view moved. A room
+          inside another (smaller) is pulled forward in the depth test by its layer, so it always draws over the
+          room around it; the heatmap is pulled further still (SmoothHeatmap.jsx). */}
+      <mesh geometry={geometry} renderOrder={1}>
         <meshStandardMaterial
           color={selected ? "#76cdb7" : "#afdcd1"}
           side={THREE.DoubleSide}
+          polygonOffset
+          polygonOffsetFactor={2 - Math.min(layer, 20) * 0.5}
+          polygonOffsetUnits={2 - Math.min(layer, 20) * 2}
         />
       </mesh>
       {showRoomNames && (
@@ -234,41 +343,50 @@ function Draggable({
     </group>
   );
 }
+// A door or window as a box in its wall gap. Rectangle rooms place it by side (north/east/south/west) and offset;
+// rooms with corners (polygons, e.g. imported rooms) by edge number and offset along that edge, turned with
+// the edge. (Placing polygon openings by the rectangle rule put them inside other walls, where the see-through
+// box fought with the wall's faces and blinked as the view moved.) The box is a centimetre narrower and lower than
+// the gap, so its faces never coincide with the wall pieces around it.
 function Opening({ item, room, type, onSelect }) {
   if (!room) return null;
-  const b = bbox(room),
-    off = Number(item.offset || 0),
+  const off = Number(item.offset || 0),
     w = Number(item.width || 1),
     h = Number(item.height || 2);
-  const side = item.wallSide || "north";
-  const horizontal = side === "north" || side === "south";
-  const x = horizontal
-    ? b.minX + off + w / 2
-    : side === "west"
-      ? b.minX
-      : b.maxX;
-  const z = horizontal
-    ? side === "north"
-      ? b.minZ
-      : b.maxZ
-    : b.minZ + off + w / 2;
+  const bottom = type === "door" ? 0 : Number(item.sillHeight || 1);
+  let x, z, angle;
+  if (room.shape !== "rectangle" && Number.isInteger(item.edgeIndex)) {
+    const pts = pointsOf(room);
+    const a = pts[item.edgeIndex % pts.length],
+      b = pts[(item.edgeIndex + 1) % pts.length];
+    const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+    const t = Math.min(len, off + w / 2);
+    x = a.x + ((b.x - a.x) * t) / len;
+    z = a.z + ((b.z - a.z) * t) / len;
+    angle = -Math.atan2(b.z - a.z, b.x - a.x);
+  } else {
+    const bb = bbox(room);
+    const side = item.wallSide || "north";
+    const horizontal = side === "north" || side === "south";
+    x = horizontal ? bb.minX + off + w / 2 : side === "west" ? bb.minX : bb.maxX;
+    z = horizontal ? (side === "north" ? bb.minZ : bb.maxZ) : bb.minZ + off + w / 2;
+    angle = horizontal ? 0 : Math.PI / 2;
+  }
   return (
     <mesh
-      position={[
-        x,
-        (type === "door" ? 0 : Number(item.sillHeight || 1)) + h / 2,
-        z,
-      ]}
+      position={[x, bottom + h / 2, z]}
+      rotation={[0, angle, 0]}
       onClick={(e) => {
         e.stopPropagation();
         onSelect({ type, id: item.id });
       }}
     >
-      <boxGeometry args={horizontal ? [w, h, 0.12] : [0.12, h, w]} />
+      <boxGeometry args={[Math.max(0.05, w - 0.02), Math.max(0.05, h - 0.02), 0.12]} />
       <meshStandardMaterial
         color={type === "door" ? "#b77938" : "#56a9c7"}
         transparent
         opacity={type === "door" ? 0.9 : 0.45}
+        depthWrite={false}
       />
     </mesh>
   );
@@ -294,20 +412,62 @@ function Scene({
   showRoomNames = true,
   showFurnitureNames = true,
   showWifiNames = true,
+  showMeasurements = false,
+  cables = null,
+  racks = null,
   isStatic = true,
   hiddenLayers = [],
+  quality = "high",
+  maxAnisotropy = 1,
+  navApi,
+  compassRef,
 }) {
   const shown = (id) => !hiddenLayers.includes(id);
   const rooms = plan.rooms.filter((r) => r.floorId === floorId),
     sources = plan.sources.filter((s) => s.floorId === floorId),
     walls = plan.interiorWalls.filter((w) => w.floorId === floorId),
     furniture = plan.furniture.filter((f) => f.floorId === floorId);
+  // drawing layer of each room floor: largest first (0), smaller ones over it
+  const roomLayer = useMemo(() => {
+    const areaOfRoom = (r) => {
+      const pts = pointsOf(r);
+      return Math.abs(pts.reduce((t, q, i) => t + q.x * pts[(i + 1) % pts.length].z - pts[(i + 1) % pts.length].x * q.z, 0)) / 2;
+    };
+    return new Map([...rooms].sort((x, y) => areaOfRoom(y) - areaOfRoom(x)).map((r, i) => [r.id, i]));
+  }, [plan.rooms, floorId]); // eslint-disable-line react-hooks/exhaustive-deps
   const logs = getFloorLogs(plan, floorId);
   const ranges = getMetricRanges(plan, metric);
   const metricColor = (value) => getMetricColor(value, ranges);
   const cells = logGrid
     ? getLogGridCells({ logs, rooms, gridSize, aggregation, metric, ranges })
     : [];
+  // Stable inputs for the heatmap: a fresh array would rebuild the whole image
+  // (and upload a new GPU texture) on every render.
+  const heatAreas = useMemo(
+    () => [
+      ...plan.rooms.filter((r) => r.floorId === floorId),
+      ...boundaryAreas(plan, floorId),
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [plan.rooms, plan.boundaries, floorId],
+  );
+  // Floor extent, for "fit to view".
+  const fitBox = useMemo(() => {
+    let box = null;
+    for (const area of heatAreas) {
+      const b = bbox(area);
+      if (![b.minX, b.maxX, b.minZ, b.maxZ].every(Number.isFinite)) continue;
+      box = box
+        ? {
+            minX: Math.min(box.minX, b.minX),
+            maxX: Math.max(box.maxX, b.maxX),
+            minZ: Math.min(box.minZ, b.minZ),
+            maxZ: Math.max(box.maxZ, b.maxZ),
+          }
+        : { minX: b.minX, maxX: b.maxX, minZ: b.minZ, maxZ: b.maxZ };
+    }
+    return box;
+  }, [heatAreas]);
   return (
     <>
       <ambientLight intensity={1.5} />
@@ -342,9 +502,11 @@ function Scene({
       {heatmap && (
         <Heatmap3D
           cells={predictions}
-          rooms={[...rooms, ...boundaryAreas(plan, floorId)]}
+          rooms={heatAreas}
           opacity={heatmapOpacity}
           ranges={predictions[0]?.ranges}
+          pxPerM={quality === "low" ? 10 : undefined}
+          maxAnisotropy={maxAnisotropy}
         />
       )}
       {logsVisible &&
@@ -373,6 +535,7 @@ function Scene({
       {(shown("rooms") ? rooms : []).map((r) => (
         <ShapeRoom
           key={r.id}
+          layer={roomLayer.get(r.id) || 0}
           room={r}
           selected={selected?.type === "room" && selected.id === r.id}
           onSelect={onSelect}
@@ -428,6 +591,39 @@ function Scene({
       })}
       {shown("walls") && (
         <Walls3D plan={plan} floorId={floorId} tool={tool} onSelect={onSelect} />
+      )}
+      {showMeasurements && (
+        <Measurements3D plan={plan} floorId={floorId} rooms={rooms} walls={walls} shown={shown} />
+      )}
+      {cables && (
+        <group>
+          {cables.runs.flatMap((run) =>
+            run.paths
+              .filter((p) => p.floorId === floorId && p.points.length > 1)
+              .map((p, i) => {
+                const apSource = sources.find((s) => s.id === run.apId);
+                const top = 2.7;
+                const a = p.points[0];
+                const b = p.points[p.points.length - 1];
+                const pts = [
+                  ...(apSource ? [[a.x, Number(apSource.heightM || 2.5), a.z]] : []),
+                  ...p.points.map((q) => [q.x, top, q.z]),
+                  [b.x, 2, b.z],
+                ];
+                const colour = run.check === "ok" ? "#1f8a4c" : run.check === "near limit" ? "#d98200" : "#c0392b";
+                return (
+                  <Line key={`c3-${run.apId}-${i}`} points={pts} color={colour} lineWidth={2}
+                    dashed={run.pathwayStatus === "estimated"} dashSize={0.3} gapSize={0.15} />
+                );
+              }),
+          )}
+          {(racks || []).filter((r) => r.floorId === floorId).map((r) => (
+            <mesh key={`r3-${r.id}`} position={[r.x, 1, r.z]}>
+              <boxGeometry args={[0.6, 2, 0.6]} />
+              <meshStandardMaterial color="#1d4ed8" />
+            </mesh>
+          ))}
+        </group>
       )}
       {overlay?.recommended?.map((r) => (
         <mesh key={r.candidateId} position={[r.planX, r.heightM, r.planZ]}>
@@ -523,23 +719,101 @@ function Scene({
           </group>
         </Draggable>
       ))}
+      {/* no "regress": lowering the resolution while the view moves resized the drawing surface, which the
+          browser clears, so the picture blinked white / low-resolution during every rotation */}
       <OrbitControls
         makeDefault
-        target={[8, 0, 7]}
+        minDistance={1}
+        maxDistance={2000}
         maxPolarAngle={Math.PI / 2.05}
+      />
+      <CameraRig
+        apiRef={navApi}
+        compassRef={compassRef}
+        box={fitBox}
+        fitKey={`${floorId}|${fitBox ? 1 : 0}`}
       />
     </>
   );
 }
+// Renderer names that mean WebGL is running on the CPU (no usable GPU).
+const SOFTWARE_RENDERER = /swiftshader|llvmpipe|softpipe|basic render|software/i;
+
+class WebGLBoundary extends React.Component {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? (
+      <div className="plan3d-fallback">
+        The 3D view could not start because WebGL is turned off on this device
+        or browser. Use the 2D view, or turn on hardware acceleration in the
+        browser settings.
+      </div>
+    ) : (
+      this.props.children
+    );
+  }
+}
+
 export default function Plan3D(props) {
+  const navApi = useRef(null),
+    compassRef = useRef(null);
+  // "high" on a GPU; "low" when WebGL falls back to software (CPU) rendering
+  const [quality, setQuality] = useState("high");
+  const [maxAnisotropy, setMaxAnisotropy] = useState(1);
+  const onKeyDown = useMemo(() => navKeyHandler(navApi), []);
   return (
-    <div className="plan3d">
-      <Canvas
-        camera={{ position: [17, 23, 28], fov: 45 }}
-        gl={{ preserveDrawingBuffer: true }}
-      >
-        <Scene {...props} />
-      </Canvas>
+    <div
+      className="plan3d"
+      tabIndex={0}
+      onKeyDown={onKeyDown}
+      aria-label="3D view. Arrow keys pan, Shift+arrows rotate and tilt, + and - zoom, N faces north, F fits the floor."
+    >
+      <WebGLBoundary>
+        <Canvas
+          frameloop="demand"
+          // one fixed resolution: it never changes while the view moves (no blinking)
+          dpr={quality === "low" ? 1 : Math.min(1.75, Math.max(1, window.devicePixelRatio || 1))}
+          camera={{ position: [17, 23, 28], fov: 45, near: 0.1, far: 5000 }}
+          gl={{
+            // ask for the discrete GPU; the browser falls back to software
+            // (CPU) WebGL by itself when there is none
+            powerPreference: "high-performance",
+            antialias: quality !== "low",
+            // kept so the plot export can read the canvas
+            preserveDrawingBuffer: true,
+          }}
+          onCreated={({ gl }) => {
+            const ctx = gl.getContext();
+            const info = ctx.getExtension("WEBGL_debug_renderer_info");
+            const name = info
+              ? ctx.getParameter(info.UNMASKED_RENDERER_WEBGL)
+              : ctx.getParameter(ctx.RENDERER);
+            if (SOFTWARE_RENDERER.test(String(name))) setQuality("low");
+            else
+              setMaxAnisotropy(Math.min(8, gl.capabilities.getMaxAnisotropy()));
+          }}
+        >
+          <Scene
+            {...props}
+            quality={quality}
+            maxAnisotropy={maxAnisotropy}
+            navApi={navApi}
+            compassRef={compassRef}
+          />
+        </Canvas>
+        <NavControls apiRef={navApi} compassRef={compassRef} />
+        {quality === "low" && (
+          <div
+            className="plan3d-badge"
+            title="No GPU is available to the browser, so the 3D view runs on the CPU at reduced quality."
+          >
+            CPU rendering
+          </div>
+        )}
+      </WebGLBoundary>
     </div>
   );
 }

@@ -73,6 +73,73 @@ def _measure(colour: np.ndarray, text: dict, ink_bgr: np.ndarray, horizontal: bo
     return best
 
 
+def _measure_plain(colour: np.ndarray, text: dict, horizontal: bool) -> dict | None:
+    """The dimension line of a size printed in plain black / grey (no colour to match): the longest THIN straight
+    run of any ink beside the text, roughly centred on it (a size is printed at the middle of its line). Thick
+    runs (a wall, the building outline) and runs far off-centre (another line passing by) are not it."""
+    gray = cv2.cvtColor(colour, cv2.COLOR_BGR2GRAY)
+    ink = gray < 225
+    box = np.asarray(text["box"], float)
+    w, h = box[:, 0].max() - box[:, 0].min(), box[:, 1].max() - box[:, 1].min()
+    H, W = ink.shape
+    reach = int(min(w, h) * 2.5) + 6
+    bridge = int(max(w, h)) + 24        # the text often sits ON the line and interrupts it
+    cx, cy = float(box[:, 0].mean()), float(box[:, 1].mean())
+    span = W if horizontal else H
+    best = None
+    centre_px = int(cy if horizontal else cx)
+    for pos in range(centre_px - reach, centre_px + reach + 1):
+        off = pos - (cy if horizontal else cx)
+        if not (3 <= pos < (H if horizontal else W) - 3):
+            continue
+        run = _longest_run(ink[pos] if horizontal else ink[:, pos], bridge)
+        if not run or run[1] - run[0] < 0.15 * span:
+            continue
+        lo, hi = run
+        length = hi - lo
+        if lo <= 2 or hi >= span - 3:
+            continue          # runs off the picture: a road, a grid line or the sheet frame, not a dimension line
+        offc = abs((lo + hi) / 2 - (cx if horizontal else cy))
+        if offc > 0.2 * length:
+            continue          # a size is printed near the middle of its own line
+        # thin: three pixels to either side the run is mostly blank (not a wall or a filled band)
+        sides = [ink[pos + d, lo:hi] if horizontal else ink[lo:hi, pos + d] for d in (-3, 3)]
+        if min(float(sd.mean()) for sd in sides) > 0.5:
+            continue
+        score = length * (1 - 2 * offc / length) - 6.0 * abs(off)
+        if best is None or score > best["score"]:
+            a = (lo, pos) if horizontal else (pos, lo)
+            b = (hi, pos) if horizontal else (pos, hi)
+            best = {"length": length, "a": a, "b": b, "score": score, "horizontal": horizontal}
+    if best:
+        best.pop("score")
+    return best
+
+
+def two_length_scale(scale: dict | None) -> tuple[float, float] | None:
+    """(pixels per metre across, pixels per metre up-down) of the ORIGINAL picture from two known lengths: A-B
+    (`lengthM`) and C-D (`heightM`). A stretched picture has different scales across and up-down; each length
+    mixes both by its direction: (dx / kx)^2 + (dy / ky)^2 = L^2, so two lengths in different directions give
+    both. None when the two are not both given or run within about 30 degrees of each other."""
+    if not scale or not all(scale.get(k) for k in ("pointA", "pointB", "pointC", "pointD", "lengthM", "heightM")):
+        return None
+    (ax, ay), (bx, by) = scale["pointA"], scale["pointB"]
+    (cx, cy), (dx, dy) = scale["pointC"], scale["pointD"]
+    x1, y1, l1 = bx - ax, by - ay, float(scale["lengthM"])
+    x2, y2, l2 = dx - cx, dy - cy, float(scale["heightM"])
+    if l1 <= 0 or l2 <= 0 or np.hypot(x1, y1) < 5 or np.hypot(x2, y2) < 5:
+        return None
+    # u = 1/kx^2, v = 1/ky^2:  x1^2 u + y1^2 v = l1^2,  x2^2 u + y2^2 v = l2^2
+    det = x1 * x1 * y2 * y2 - y1 * y1 * x2 * x2
+    if abs(det) < 0.25 * (x1 * x1 + y1 * y1) * (x2 * x2 + y2 * y2):
+        return None
+    u = (l1 * l1 * y2 * y2 - y1 * y1 * l2 * l2) / det
+    v = (x1 * x1 * l2 * l2 - l1 * l1 * x2 * x2) / det
+    if u <= 0 or v <= 0:
+        return None
+    return float(1 / np.sqrt(u)), float(1 / np.sqrt(v))
+
+
 def estimate(colour: np.ndarray, texts: list[dict]) -> dict:
     """{"pxPerM", "confidence", "votes", "spreadPct", "found": [...]} or {"pxPerM": None, ...}."""
     found = []
@@ -80,13 +147,28 @@ def estimate(colour: np.ndarray, texts: list[dict]) -> dict:
         if t.get("kind") != "dimension" or t.get("how") != "m" or float(t.get("metres", 0)) < MIN_METRES:
             continue
         ink = _text_colour(colour, np.asarray(t["box"], float))
-        if ink is None:
-            continue
         # the OCR does not always report the turn of vertical text: try both directions, keep the longer line
-        lines = [m for m in (_measure(colour, t, ink, True), _measure(colour, t, ink, False)) if m]
+        box = np.asarray(t["box"], float)
+        tcx, tcy = float(box[:, 0].mean()), float(box[:, 1].mean())
+
+        def centred(m):     # a size is printed near the middle of its own line
+            lo, hi = (m["a"][0], m["b"][0]) if m["horizontal"] else (m["a"][1], m["b"][1])
+            return abs((lo + hi) / 2 - (tcx if m["horizontal"] else tcy)) <= 0.2 * m["length"]
+
+        # coloured size: the line of the same colour; plain black / grey size: the thin line centred on it. Both
+        # are tried (a coloured line can run through black text); the long line closest to the text wins.
+        lines = []
+        if ink is not None:
+            lines = [m for m in (_measure(colour, t, ink, True), _measure(colour, t, ink, False)) if m and centred(m)]
+        lines += [m for m in (_measure_plain(colour, t, True), _measure_plain(colour, t, False)) if m]
         if not lines:
             continue
-        line = max(lines, key=lambda m: m["length"])
+
+        def score(m):
+            gap = abs(m["a"][1] - tcy) if m["horizontal"] else abs(m["a"][0] - tcx)
+            return m["length"] - 6.0 * gap
+
+        line = max(lines, key=score)
         found.append({"text": t["text"], "metres": float(t["metres"]), "linePx": float(line["length"]),
                       "pxPerM": line["length"] / float(t["metres"]), "horizontal": line["horizontal"],
                       "a": line["a"], "b": line["b"]})

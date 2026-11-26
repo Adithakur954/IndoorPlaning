@@ -70,27 +70,33 @@ def find_perimeter(evidence: np.ndarray, thickness: float, frame: dict[str, floa
 
 
 def perimeter_walls(found: dict[str, dict], frame: dict[str, float | None], size: tuple[int, int],
-                    thickness: float, content_top: float | None = None) -> tuple[list[Wall], list[str]]:
-    """Walls for the sides that have a band; the others are closed by a
-    virtual wall at the drawing edge (flagged, low confidence)."""
+                    thickness: float, content_top: float | None = None,
+                    content: tuple[float, float, float, float] | None = None) -> tuple[list[Wall], list[str]]:
+    """Walls for the sides that have a band. A side without one is closed at the
+    edge of the building's own walls (`content`: x0, x1, y0, y1 of the main wall
+    network) when known, else at the drawing edge; either way it is a virtual
+    wall (flagged, low confidence). The sheet edge would take title blocks and
+    legends into the building."""
     w, h = size
     notes: list[str] = []
     left = found.get("left", {}).get("pos")
     right = found.get("right", {}).get("pos")
     top = found.get("top", {}).get("pos")
     bottom = found.get("bottom", {}).get("pos")
+    # (a band that was found is always trusted: the wall pieces can still be broken into
+    # separate networks at this point, so `content` only fills the sides without one)
     virtual: list[str] = []
     if top is None:
-        top = (frame["top"] if frame["top"] is not None else (content_top or 0.0)) + 1.0
+        top = content[2] if content else (frame["top"] if frame["top"] is not None else (content_top or 0.0)) + 1.0
         virtual.append("top")
     if bottom is None:
-        bottom = (frame["bottom"] if frame["bottom"] is not None else h - 1.0) - 1.0
+        bottom = content[3] if content else (frame["bottom"] if frame["bottom"] is not None else h - 1.0) - 1.0
         virtual.append("bottom")
     if left is None:
-        left = (frame["left"] if frame["left"] is not None else 0.0) + 1.0
+        left = content[0] if content else (frame["left"] if frame["left"] is not None else 0.0) + 1.0
         virtual.append("left")
     if right is None:
-        right = (frame["right"] if frame["right"] is not None else w - 1.0) - 1.0
+        right = content[1] if content else (frame["right"] if frame["right"] is not None else w - 1.0) - 1.0
         virtual.append("right")
     walls: list[Wall] = []
     sides = {"top": ((left, top), (right, top), "h"), "bottom": ((left, bottom), (right, bottom), "h"),
@@ -98,11 +104,13 @@ def perimeter_walls(found: dict[str, dict], frame: dict[str, float | None], size
     for name, (a, b, orient) in sides.items():
         is_virtual = name in virtual
         wall = Wall(a, b, thickness, confidence=0.3 if is_virtual else 0.8, orientation=orient)
-        wall.notes.append("drawing edge: the plan is cut off here (virtual wall, check it)"
+        wall.notes.append(("outline closed along the outermost drawn walls (virtual wall, check it)" if content
+                           else "drawing edge: the plan is cut off here (virtual wall, check it)")
                           if is_virtual else "outer wall found as a thick band along the drawing edge")
         wall.virtual = is_virtual  # type: ignore[attr-defined]
         walls.append(wall)
     if virtual:
-        notes.append("no outer wall was found on the " + ", ".join(virtual) +
-                     " side(s): the drawing edge was used as a virtual wall")
+        notes.append("no outer wall was found on the " + ", ".join(virtual) + " side(s): " +
+                     ("the outline was closed along the outermost drawn walls" if content
+                      else "the drawing edge was used as a virtual wall"))
     return walls, notes

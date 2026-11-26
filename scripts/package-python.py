@@ -24,7 +24,14 @@ if version != "python313":
 (runtime / f"{version}._pth").write_text(f"{version}.zip\n.\nLib/site-packages\n../../worker\nimport site\n", encoding="utf-8")
 for package in ["floorplan", "sionna_worker"]:
     shutil.copytree(root / "worker" / package, destination / "worker" / package, ignore=ignored, dirs_exist_ok=True)
-model = root / "worker" / "models" / "floorplan_unet_run5.onnx"
+# the AP placement search (Rust, capacity/src/apsearch.rs): build it with
+# `cargo build --release --bin apsearch` in capacity/ before packaging
+apsearch = root / "capacity" / "target" / "release" / "apsearch.exe"
+if not apsearch.is_file():
+    raise RuntimeError("apsearch.exe is missing: run `cargo build --release --bin apsearch` in capacity/")
+(destination / "worker" / "bin").mkdir(parents=True, exist_ok=True)
+shutil.copy2(apsearch, destination / "worker" / "bin" / apsearch.name)
+model = root / "worker" / "models" / "floorplan_unet_run6.onnx"
 if not model.is_file():
     raise RuntimeError("Required floor-plan model is missing")
 (destination / "worker" / "models").mkdir(parents=True, exist_ok=True)

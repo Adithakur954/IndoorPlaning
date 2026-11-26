@@ -37,6 +37,8 @@ export default function PredictionPanel({
     restoreNote,
     runPrediction,
     clearPrediction,
+    deletePrediction,
+    noApsLeft,
     showPrediction,
     heatmapOn,
     removeOptimizedAps,
@@ -80,11 +82,22 @@ export default function PredictionPanel({
         disabled={busy || !rt.jobId}
         title={
           heatmapOn
-            ? "Hide the heatmap to see only the building (the run stays saved)"
+            ? "Hide the heatmap to see only the building (the prediction stays saved)"
             : "Show the saved prediction again without running it"
         }
       >
-        {heatmapOn ? "Clear prediction" : "Show prediction"}
+        {heatmapOn ? "Hide heatmap" : "Show heatmap"}
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          if (window.confirm("Clear the prediction? It is deleted from this project; run it again to get a new one."))
+            deletePrediction();
+        }}
+        disabled={busy || !rt.jobId}
+        title="Delete the saved prediction (it does not come back until you run it again)"
+      >
+        Clear prediction
       </button>
       {optimizedAps.length > 0 && (
         <p className="panel-note">
@@ -122,9 +135,15 @@ export default function PredictionPanel({
       ))}
       {rt.result && (
         <>
-          {stale && !busy && !run?.error && (
+          {noApsLeft && (
+            <p className="warn">
+              No Wi-Fi access points are in the plan any more: the old prediction no longer applies, so it is hidden.
+              Place an AP and run the prediction again.
+            </p>
+          )}
+          {stale && !noApsLeft && !busy && !run?.error && (
             <p className="panel-note">
-              The plan changed after this run. The prediction updates
+              Out of date: the plan changed after this run (the heatmap is shown faded). The prediction updates
               automatically in a moment.
             </p>
           )}

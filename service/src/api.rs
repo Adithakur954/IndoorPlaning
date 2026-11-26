@@ -4,6 +4,7 @@
 //!   POST /api/simulations                  { sceneId, settings? } -> { id, status, cached }
 //!   GET  /api/simulations/{id}             -> { id, status, error?, result? }
 //!   GET  /api/simulations/{id}/maps/{file} -> radio-map JSON
+//!   POST /api/capacity                     { op, plan, settings, cells } -> capacity result
 //!   GET  /api/health
 
 use axum::body::Bytes;
@@ -57,6 +58,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/optimizations/{id}", get(status))
         .route("/api/optimizations/{id}/maps/{file}", get(map_file))
         .route("/api/simulations/{id}/maps/{file}", get(map_file))
+        .route("/api/capacity", post(capacity))
         .layer(DefaultBodyLimit::max(limit))
         .layer(axum::middleware::from_fn_with_state(state.clone(), crate::licensing::require_license))
         .with_state(state)
@@ -309,6 +311,63 @@ async fn cache_clear(State(state): State<Shared>) -> Result<Json<serde_json::Val
         return Err(ApiError(StatusCode::CONFLICT, "wait for the running job to finish".into()));
     }
     Ok(Json(json!({ "freedBytes": maintenance::clear_cache(&state.cfg) })))
+}
+
+/// Wi-Fi capacity (the capacity-core crate, run natively): the same requests the
+/// planner sends to its WebAssembly copy of the engine, for runs too large for a
+/// browser (many floors, thousands of users, thousands of Monte Carlo runs).
+async fn capacity(body: Bytes) -> Result<Response, ApiError> {
+    let out = tokio::task::spawn_blocking(move || capacity_request(&body)).await.map_err(internal)?.map_err(bad)?;
+    Ok(([(header::CONTENT_TYPE, "application/json")], out).into_response())
+}
+
+fn capacity_request(body: &[u8]) -> Result<Vec<u8>, String> {
+    let req: serde_json::Value = serde_json::from_slice(body).map_err(|e| format!("bad JSON: {e}"))?;
+    match req.get("op").and_then(|v| v.as_str()) {
+        Some("plan" | "sensitivity" | "monteCarlo" | "loadTest" | "loadTestHeatmap" | "links" | "meta") => {}
+        Some(op) => return Err(format!("unsupported capacity op: {op}")),
+        None => return Err("missing op".into()),
+    }
+    if req.get("cells").and_then(|v| v.as_str()).is_some() {
+        return Err("send the prediction cells themselves; the service keeps no cache".into());
+    }
+    let out = capacity_core::handle(&req);
+    if let Some(e) = out.get("error").and_then(|v| v.as_str()) {
+        return Err(e.to_string());
+    }
+    serde_json::to_vec(&out).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod capacity_tests {
+    use super::capacity_request;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn runs_the_capacity_engine_natively() {
+        let plan = json!({
+            "floors": [{ "id": "f1", "name": "L1" }],
+            "rooms": [{ "id": "r", "floorId": "f1", "name": "Office", "shape": "rectangle", "x": 0, "z": 0, "width": 20, "depth": 10 }],
+            "sources": [{ "id": "a1", "kind": "wifi", "name": "AP-1", "floorId": "f1", "x": 10, "z": 5 }],
+        });
+        let settings = json!({ "totalPeople": 40, "monteCarlo": { "iterations": 20, "maxIterations": 20 } });
+        let det: Value = serde_json::from_slice(&capacity_request(&serde_json::to_vec(&json!({ "op": "plan", "plan": plan, "settings": settings })).unwrap()).unwrap()).unwrap();
+        assert_eq!(det["summary"]["totalUsers"], json!(40.0));
+        let mc: Value = serde_json::from_slice(&capacity_request(&serde_json::to_vec(&json!({ "op": "monteCarlo", "plan": plan, "settings": settings })).unwrap()).unwrap()).unwrap();
+        assert_eq!(mc["iterations"], json!(20));
+        assert_eq!(mc["samples"]["median"]["users"].as_array().unwrap().len(), 40);
+        let lt_settings = json!({ "totalPeople": 40, "loadTest": { "startUsers": 20, "maxUsers": 200, "stepUsers": 60, "runsPerStep": 10 } });
+        let lt: Value = serde_json::from_slice(&capacity_request(&serde_json::to_vec(&json!({ "op": "loadTest", "plan": plan, "settings": lt_settings })).unwrap()).unwrap()).unwrap();
+        assert!(lt["steps"].as_array().is_some_and(|s| !s.is_empty()));
+        assert!(lt["result"]["testedUpToUsers"].as_u64().is_some());
+    }
+
+    #[test]
+    fn refuses_what_only_makes_sense_in_the_browser() {
+        assert!(capacity_request(br#"{"op":"setCells","cells":{}}"#).is_err());
+        assert!(capacity_request(br#"{"op":"plan","plan":{},"cells":"cached"}"#).is_err());
+        assert!(capacity_request(b"not json").is_err());
+    }
 }
 
 /// Removes results no project refers to (e.g. after a project was deleted). Runs

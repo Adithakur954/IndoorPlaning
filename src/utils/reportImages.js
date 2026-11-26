@@ -90,7 +90,11 @@ export async function renderFloorImage({
     ctx.save();
     ctx.beginPath();
     for (const area of areas) {
-      pointsOf(area).forEach((p, i) =>
+      // same direction for every outline, so a room inside another is not cut out as a hole (nonzero rule)
+      let pts = pointsOf(area);
+      const twice = pts.reduce((t, p, i) => t + p.x * pts[(i + 1) % pts.length].z - pts[(i + 1) % pts.length].x * p.z, 0);
+      if (twice < 0) pts = [...pts].reverse();
+      pts.forEach((p, i) =>
         i ? ctx.lineTo(X(p.x), Z(p.z)) : ctx.moveTo(X(p.x), Z(p.z)),
       );
       ctx.closePath();

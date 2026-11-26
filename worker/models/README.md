@@ -1,6 +1,13 @@
 # Floor-plan segmentation model
 
-`floorplan_unet_run5.onnx` (current; run4 kept as `floorplan_unet_run4.onnx` — to go back, set `MODEL_NAME` in `floorplan/model.py`) (not in git; 97.7 MB). A U-Net (ResNet-34 encoder) trained from scratch, no pretrained
+`floorplan_unet_run6.onnx` (current, from 2026-11-24; run5 and run4 kept: to go back, set `MODEL_NAME` in
+`floorplan/model.py`) (not in git; 97.8 MB). Run 6: U-Net (ResNet-34 encoder) trained from scratch on the dataset_v6
+mix (40 % dataset_v4, 60 % hard cases: dense CAD and RF exports, low resolution, hatched voids, overlays) with
+Skeleton Recall Loss and a wall centre-line head (the head is cut off in the export). 16 classes: the 14 below plus
+14 stairs and 15 void. Best checkpoint step 76,000 (structure score 0.937 on v6 validation). Export checked against
+PyTorch: 99.999-100 % label agreement.
+
+Previous: `floorplan_unet_run5.onnx` (current; run4 kept as `floorplan_unet_run4.onnx` — to go back, set `MODEL_NAME` in `floorplan/model.py`) (not in git; 97.7 MB). A U-Net (ResNet-34 encoder) trained from scratch, no pretrained
 weights, on synthetic plans. Classes: 0 background, 1 wall, 2 door, 3 window, 4 floor, 5 column, 6 AP marker.
 Input: BGR image / 127.5 - 1, any size (padded to a multiple of 32). Runs on the CPU with onnxruntime
 (about 1 s for a 1600 x 1400 plan).

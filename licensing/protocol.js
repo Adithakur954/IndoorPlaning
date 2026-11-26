@@ -48,6 +48,22 @@ export function verifyEnvelope(token, prefix, publicKey) {
   return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
 }
 
+// Optional product modules a license can unlock. A license without a
+// `features` list is a Wi-Fi license, so keys issued before this field existed
+// keep working unchanged. Names the app does not know are ignored, so a newer
+// key never breaks an older app.
+export const FEATURES = ["wifi", "cellular"];
+
+export function grantFeatures(grant) {
+  if (!Array.isArray(grant?.features)) return ["wifi"];
+  return FEATURES.filter((name) => grant.features.includes(name));
+}
+
+// One rule for every check: Node API, UI and (later) the Rust service.
+// Development mode and states that carry no feature list are decided by the caller.
+export const featureAllowed = (license, name) =>
+  Array.isArray(license?.features) && license.features.includes(name);
+
 export function validateGrant(grant) {
   if (
     grant?.product !== PRODUCT ||
@@ -60,7 +76,11 @@ export function validateGrant(grant) {
     ) ||
     !Number.isInteger(grant.durationDays) ||
     grant.durationDays < 1 ||
-    grant.durationDays > 36500
+    grant.durationDays > 36500 ||
+    (grant.features !== undefined &&
+      (!Array.isArray(grant.features) ||
+        grant.features.length > 16 ||
+        grant.features.some((name) => typeof name !== "string")))
   ) {
     throw new Error("Invalid license contents");
   }

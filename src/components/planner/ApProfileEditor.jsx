@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useState } from "react";
 import Field from "../ui/Field.jsx";
+import AddApModel from "./AddApModel.jsx";
 import {
   BANDS,
   channelCenterMHz,
@@ -13,6 +14,8 @@ export default function ApProfileEditor({ plan, mutate, optimization: o }) {
   const { settings, patch, profile, radio } = o;
   const warnings = profileWarnings(profile, settings.band);
   const wifiAps = plan.sources.filter((s) => s.kind === "wifi");
+  const [adding, setAdding] = useState(false);
+  const ADD_NEW = "__add-new-model__";
   return (
       <section className="panel">
         <h2>Wi-Fi AP properties</h2>
@@ -21,6 +24,10 @@ export default function ApProfileEditor({ plan, mutate, optimization: o }) {
           <select
             value={profile.id}
             onChange={(e) => {
+              if (e.target.value === ADD_NEW) {
+                setAdding(true);
+                return;
+              }
               const next = o.profiles.find((p) => p.id === e.target.value);
               patch({
                 profileId: e.target.value,
@@ -35,8 +42,19 @@ export default function ApProfileEditor({ plan, mutate, optimization: o }) {
                 {p.name}
               </option>
             ))}
+            <option value={ADD_NEW}>+ Add new model…</option>
           </select>
         </label>
+        {adding && (
+          <AddApModel
+            existingNames={o.profiles.map((p) => p.name)}
+            onCancel={() => setAdding(false)}
+            onAdd={(models) => {
+              o.addProfiles(models);
+              setAdding(false);
+            }}
+          />
+        )}
         <div className="segmented" role="group" aria-label="Band">
           {BANDS.filter((b) => profile.bands[b]).map((b) => (
             <button
@@ -102,6 +120,25 @@ export default function ApProfileEditor({ plan, mutate, optimization: o }) {
         </div>
         <small className="hint">
           Used by the prediction and the optimiser: the antenna gain of the phone or laptop that receives.
+        </small>
+        <div className="inspector-fields mount-height">
+          <Field
+            label="New Wi-Fi AP height (m)"
+            type="number"
+            min="0"
+            value={plan.rf?.newApHeightM ?? 2.7}
+            onChange={(v) => mutate((p) => ({ ...p, rf: { ...p.rf, newApHeightM: Math.max(0, v) } }))}
+          />
+          <Field
+            label="New cellular site height (m)"
+            type="number"
+            min="0"
+            value={plan.rf?.newCellHeightM ?? 3}
+            onChange={(v) => mutate((p) => ({ ...p, rf: { ...p.rf, newCellHeightM: Math.max(0, v) } }))}
+          />
+        </div>
+        <small className="hint">
+          Height given to an AP or cellular site when you place it on the plan. Each one can then be changed in its own properties.
         </small>
         {warnings.map((w) => (
           <small key={w} className="warn">

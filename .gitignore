@@ -23,6 +23,7 @@ worker/out/
 worker/samples/*.zip
 __pycache__/
 service/target/
+capacity/target/
 data/simulations/
 worker/samples/*/opt-out/
 worker/samples/*/opt-cache/
@@ -67,3 +68,18 @@ OneDrive_*.zip
 /*.zip
 outputs/
 .claude/settings.local.json
+
+# Office lock files and scratch spreadsheets/exports in the repo root
+~$*
+/*.xlsx
+/*.xls
+/*.csv
+
+# User manual: screenshots and exported Word/PDF copies (generated from
+# docs/CLIENT_USER_MANUAL.md; kept locally, shared outside git)
+docs/manual-images/
+docs/*.docx
+docs/*.pdf
+
+# Generated floor-plan pipeline output (inputs in worker/samples stay tracked)
+worker/samples/floorplan/output_*/

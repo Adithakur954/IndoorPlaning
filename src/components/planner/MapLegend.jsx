@@ -5,7 +5,7 @@ import { INDOOR_LOG_KPIS } from "../../utils/indoorLogKpis.js";
 import { openEndedBands } from "../../utils/logOverlay.js";
 
 export const LEGEND_SECTIONS = [
-  { id: "kpi", label: "KPI colour bands" },
+  { id: "kpi", label: "KPI colour bands (while a prediction or logs are shown)" },
   { id: "access", label: "Access points" },
   { id: "structure", label: "Building structure" },
   { id: "measured", label: "Measured log points" },
@@ -29,6 +29,9 @@ export default function MapLegend({
   overlay,
   provenance = "none",
   hasLogs = false,
+  // a prediction heatmap or log points are on the map: only then do the KPI
+  // colour bands mean anything, so only then is the KPI section shown
+  kpiOnMap = false,
   sections = DEFAULT_LEGEND_SECTIONS,
   metric = "rsrp",
   setMetric,
@@ -38,12 +41,14 @@ export default function MapLegend({
 }) {
   const [open, setOpen] = useState(true);
   const coverageView = predictionRanges.length === 2 && provenance === "opt";
-  const show = (id) => sections.includes(id);
+  const show = (id) =>
+    sections.includes(id) && (id !== "kpi" || kpiOnMap) && (id !== "measured" || hasLogs);
   // RSSI and RSRP (dBm) and SNR (dB) have a predicted heatmap; the others are log colours only
   const dbmKpi = metric === "rssi" || metric === "rsrp" || metric === "snr";
   const kpi = INDOOR_LOG_KPIS.find((k) => k.key === metric);
   const bands = openEndedBands(dbmKpi ? predictionRanges : metricRanges);
-  if (!sections.length) return null;
+  if (!LEGEND_SECTIONS.some((s) => show(s.id)) && !(provenance === "opt" && optimization?.opt))
+    return null;
   return (
     <div className="map-legend" aria-label="Legend">
       <button
@@ -107,7 +112,7 @@ export default function MapLegend({
               )}
             </section>
           )}
-          {show("measured") && hasLogs && (
+          {show("measured") && (
             <section>
               <h4>Measured</h4>
               <div className="map-legend-row">

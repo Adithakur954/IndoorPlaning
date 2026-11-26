@@ -35,11 +35,13 @@ export default function DesignPanel({
   showRoomNames,
   showFurnitureNames = true,
   showWifiNames = true,
+  showMeasurements = false,
+  cableDesign = null,
   selected,
   setSelected,
   place,
   move,
-  movePolygonPart,
+  moveShapePart,
   predictions,
   predictionMetric,
   predictionRanges,
@@ -200,6 +202,10 @@ export default function DesignPanel({
                   : "none"
             }
             hasLogs={logsVisible && plan.logs.some((l) => l.floorId === floorId)}
+            kpiOnMap={
+              (heatmap && predictions?.length > 0) ||
+              (logsVisible && plan.logs.some((l) => l.floorId === floorId))
+            }
             hasBoundary={(plan.boundaries || []).some((b) => b.floorId === floorId)}
           />
           {mapMode === "prediction" && (prediction.busy || prediction.run?.error) && (
@@ -225,11 +231,14 @@ export default function DesignPanel({
                 showRoomNames,
                 showFurnitureNames,
                 showWifiNames,
+                showMeasurements,
+                cables: cableDesign,
+                racks: plan.cabling?.racks,
                 selected,
                 onSelect: setSelected,
                 onPlace: place,
                 onMove: move,
-                onMovePolygonPart: movePolygonPart,
+                onMoveShapePart: moveShapePart,
                 predictions,
                 overlay,
                 heatmap,
@@ -255,6 +264,9 @@ export default function DesignPanel({
                 showRoomNames,
                 showFurnitureNames,
                 showWifiNames,
+                showMeasurements,
+                cables: cableDesign,
+                racks: plan.cabling?.racks,
                 selected,
                 onSelect: setSelected,
                 onPlace: place,

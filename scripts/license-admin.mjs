@@ -1,7 +1,12 @@
 import { generateKeyPairSync, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { PRODUCT, signEnvelope, validateGrant } from "../licensing/protocol.js";
+import {
+  FEATURES,
+  PRODUCT,
+  signEnvelope,
+  validateGrant,
+} from "../licensing/protocol.js";
 
 const [command, ...args] = process.argv.slice(2);
 const options = Object.fromEntries(
@@ -40,6 +45,15 @@ if (command === "init" && options.dir) {
     "Created private.pem and public.key. Distribute only public.key.",
   );
 } else if (command === "issue" && options.private && options.out) {
+  const features = String(options.features || "wifi")
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+  const unknown = features.filter((name) => !FEATURES.includes(name));
+  if (unknown.length || !features.length)
+    throw new Error(
+      `--features must be a comma list of: ${FEATURES.join(", ")} (got: ${unknown.join(", ") || "nothing"})`,
+    );
   const grant = validateGrant({
     product: PRODUCT,
     version: 2,
@@ -48,6 +62,7 @@ if (command === "init" && options.dir) {
       .trim()
       .toUpperCase(),
     durationDays: Number(options.days),
+    features,
   });
   writeFileSync(
     options.out,
@@ -55,11 +70,11 @@ if (command === "init" && options.dir) {
     { flag: "wx", mode: 0o600 },
   );
   console.log(
-    `Created ${grant.durationDays}-day offline key at ${options.out}. Expiry uses the activating computer's date starting at first activation.`,
+    `Created ${grant.durationDays}-day offline key (${features.join(", ")}) at ${options.out}. Expiry uses the activating computer's date starting at first activation.`,
   );
 } else {
   console.error(
-    "Usage:\n  node scripts/license-admin.mjs init --dir <private-directory>\n  node scripts/license-admin.mjs issue --private <private.pem> --machine-id <hashed-machine-id> --days <30> --out <customer.license>",
+    "Usage:\n  node scripts/license-admin.mjs init --dir <private-directory>\n  node scripts/license-admin.mjs issue --private <private.pem> --machine-id <hashed-machine-id> --days <30> [--features wifi,cellular] --out <customer.license>",
   );
   process.exitCode = 1;
 }

@@ -113,6 +113,73 @@ test("an open plan with only small closed rooms gets one room for the whole floo
   assert.equal(reconstructionToPlan(full, "level-1").rooms.some((r) => r.name === "Floor"), false);
 });
 
+test("every wall the detection shows reaches the editor, even with no closed room", () => {
+  // a drawing whose walls never closed into a room: before, all of them were dropped
+  const free = (a, b, extra = {}) => ({ aM: a, bM: b, role: "free", anchored: false, confidence: 0.8, thicknessM: 0.2, notes: [], ...extra });
+  const open = {
+    scale: { pxPerM: 20, widthM: 60, heightM: 40 },
+    walls: [
+      free([0, 0], [20, 0]), free([20, 0.4], [20, 12]), free([0, 12], [19.5, 12]),
+      free([5, 5], [5.3, 5]),                       // a 0.3 m mark: not a wall
+      free([8, 8], [9, 8]),                         // 1 m, joined to nothing: a symbol
+      free([2, 3], [2, 9], { confidence: 0.2 }),    // too faint to be a wall
+    ],
+    rooms: [], openings: [], columns: [], markers: [], warnings: [],
+  };
+  const c = reconstructionToPlan(open, "f");
+  assert.equal(c.interiorWalls.length, 3);
+  assert.ok(c.interiorWalls.every((w) => w.needsReview), "loose walls are marked for review, not dropped");
+  assert.ok(c.warnings.some((w) => /3 tiny or very faint/.test(w)));
+});
+
+test("the whole floor follows the building's walls, not the title block or the legends", () => {
+  const wall = (a, b) => ({ aM: a, bM: b, role: "free", anchored: true, confidence: 0.9, thicknessM: 0.2 });
+  const box = (x0, z0, x1, z1) => [wall([x0, z0], [x1, z0]), wall([x1, z0], [x1, z1]), wall([x1, z1], [x0, z1]), wall([x0, z1], [x0, z0])];
+  const sheet = {
+    scale: { pxPerM: 7, widthM: 230, heightM: 150 },
+    walls: [
+      ...box(20, 30, 200, 110),                     // the building
+      wall([60, 30], [60, 110]), wall([120, 30], [120, 110]),
+      ...box(90, 0, 150, 10),                       // "Ground Floor" title block
+      ...box(150, 120, 225, 148),                   // the legends
+    ],
+    rooms: [], openings: [], columns: [], markers: [], warnings: [],
+  };
+  const floor = reconstructionToPlan(sheet, "f").rooms.find((r) => r.name === "Floor");
+  assert.deepEqual([floor.x, floor.z, floor.width, floor.depth], [20, 30, 180, 80]);
+});
+
+test("a drawn line on a coarse picture does not become a thick wall: the material's typical thickness is used", () => {
+  // 1 px = 0.16 m: a drawn line says nothing about the real wall
+  const coarse = { ...result, scale: { ...result.scale, pxPerM: 6.2 }, walls: result.walls.map((w) => ({ ...w, thicknessM: 0.66 })) };
+  const c = reconstructionToPlan(coarse, "level-1");
+  assert.equal(c.wallThickness, 0.12);
+  assert.match(c.thicknessNote, /typical value for drywall/);
+});
+
+test("a fine picture gives the measured wall thickness", () => {
+  // 1 px = 1 cm: the drawn width is the wall's width
+  const fine = { ...result, scale: { ...result.scale, pxPerM: 100 }, walls: result.walls.map((w) => ({ ...w, thicknessM: 0.24 })) };
+  const c = reconstructionToPlan(fine, "level-1");
+  assert.equal(c.wallThickness, 0.24);
+  assert.match(c.thicknessNote, /measured on the drawing/);
+});
+
+test("walls drawn in a legend colour take that material and its thickness", () => {
+  const withLegend = {
+    ...result,
+    scale: { ...result.scale, pxPerM: 6.2 },
+    walls: result.walls.map((w) => ({ ...w, material: "concrete", materialLabel: "Concrete [Heavy]" })),
+  };
+  const c = reconstructionToPlan(withLegend, "level-1");
+  assert.deepEqual(c.materialThickness, { concrete: 0.3 });
+  const plan = applyReconstruction({ ...initialPlan(), materialOverrides: {} }, c, "level-1");
+  assert.equal(plan.materialOverrides.concrete.thicknessM, 0.3);
+  // a thickness you set yourself is kept
+  const mine = applyReconstruction({ ...initialPlan(), materialOverrides: { concrete: { thicknessM: 0.45 } } }, c, "level-1");
+  assert.equal(mine.materialOverrides.concrete.thicknessM, 0.45);
+});
+
 test("furniture found by the model becomes sized boxes with default heights", () => {
   const withFurniture = {
     ...result,
