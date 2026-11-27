@@ -15,7 +15,7 @@ export const planStamp = (plan) =>
     plan.doors,
     plan.windows,
     plan.interiorWalls,
-    (plan.sources || []).filter((s) => s.kind !== "cellular"),
+    (plan.sources || []).filter((s) => s.kind !== "cellular" && s.kind !== "das"),
     plan.wallTypes,
     plan.wallThickness,
     plan.materialOverrides,

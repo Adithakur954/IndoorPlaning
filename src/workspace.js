@@ -19,7 +19,7 @@ export function workspaceOf(item) {
   const type = item?.projectType;
   if (type === "wifi" || type === "cellular") return type;
   const sources = item?.sources;
-  const wifi = sources ? sources.filter((s) => s.kind !== "cellular").length : item?.wifiCount || 0;
+  const wifi = sources ? sources.filter((s) => s.kind !== "cellular" && s.kind !== "das").length : item?.wifiCount || 0;
   const cellular = sources ? sources.filter((s) => s.kind === "cellular").length : item?.cellularCount || 0;
   return cellular > 0 && wifi === 0 ? "cellular" : "wifi";
 }

@@ -13,8 +13,15 @@ const toolLabels = {
   window: "Window",
   furniture: "Furniture",
   cellular: "Antenna",
+  dassource: "Source (BTS)",
+  splitter: "Splitter",
+  coupler: "Coupler",
+  riser: "Riser",
+  dascable: "Cable",
   wifi: "Wi-Fi AP",
 };
+// tools of one network only: a Wi-Fi project places APs, a cellular one antennas and the DAS
+const CELLULAR_TOOLS = ["cellular", "dassource", "splitter", "coupler", "riser", "dascable"];
 
 export default function EditorMenu({ active, onOpen }) {
   return (
@@ -64,13 +71,13 @@ export function EditorToolOptions({
   setSnap,
   workspace = "wifi",
 }) {
-  // a project places only its own network: APs in Wi-Fi, antennas in cellular
-  const hidden = workspace === "cellular" ? "wifi" : "cellular";
+  // a project places only its own network: APs in Wi-Fi, antennas and the DAS in cellular
+  const isHidden = (value) => (workspace === "cellular" ? value === "wifi" : CELLULAR_TOOLS.includes(value));
   return (
     <>
       <div className="popover-label">DRAW TOOLS</div>
       <div className="editor-tool-grid">
-        {Object.entries(toolLabels).filter(([value]) => value !== hidden).map(([value, label]) => (
+        {Object.entries(toolLabels).filter(([value]) => !isHidden(value)).map(([value, label]) => (
           <button
             key={value}
             type="button"

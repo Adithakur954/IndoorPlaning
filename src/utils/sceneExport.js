@@ -208,7 +208,7 @@ export async function buildSceneFiles(plan, options = {}) {
     throw new Error(`Unknown scene sources: ${sources}`);
   const isExported = (s) =>
     sources === "wifi"
-      ? s.kind !== "cellular"
+      ? s.kind !== "cellular" && s.kind !== "das" // DAS parts (splitters, couplers ...) never transmit
       : sources === "cellular" && s.kind === "cellular";
   const wallThicknessM = Number(plan.wallThickness) || 0.2;
   const { overrides: materialOverrides, errors: overrideErrors } =

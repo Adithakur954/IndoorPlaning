@@ -2,7 +2,7 @@
 //
 // network = {
 //   rootId: "bts",
-//   nodes: { id: { type: "bts" | "coupler" | "splitter" | "inline" | "antenna",
+//   nodes: { id: { type: "bts" | "coupler" | "splitter" | "inline" | "riser" | "antenna",
 //                  partId, ... } },
 //   edges: [{ from, to, cableId, lengthM, port?: "through" | "tap",
 //             connectors?: number }]
@@ -43,6 +43,7 @@ function nodeLossDb(node, nodeId, edge, edgeCount, catalogue) {
   switch (node.type) {
     case "bts":
     case "antenna":
+    case "riser": // a point where the cable changes floor: no loss of its own
       return 0;
     case "coupler": {
       const coupler = part(catalogue, "couplers", node.partId, nodeId);

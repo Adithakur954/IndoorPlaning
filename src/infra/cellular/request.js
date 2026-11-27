@@ -8,6 +8,7 @@ import { inside } from "../../utils/geometry.js";
 import { rsrpOffsetDb, resourceBlocksFor, carrierLabel } from "./bands.js";
 import { patternFor } from "./antennaPattern.js";
 import { antennaModels, cellularAntennas, cellularOf, predictionProblems } from "./model.js";
+import { dasPowers } from "./das.js";
 
 // plan (x, y-up, z) -> Sionna scene (x, -z, y), as in sceneExport.js
 const toScene = (x, y, z) => [x, -z, y];
@@ -48,6 +49,12 @@ export function buildCellularRequest(plan, carrierId, { floorIds } = {}) {
 
   const patterns = {};
   const notes = [];
+  // antennas fed by a DAS source get their port power from the network; the others keep the typed value
+  const das = dasPowers(plan, carrier);
+  if (das.errors.length) return { problems: das.errors.map((e) => `DAS network: ${e}`) };
+  notes.push(...das.warnings.map((w) => `DAS network: ${w}`));
+  const fed = antennas.filter((a) => das.antennas[a.id]).length;
+  if (fed) notes.push(`${fed} of ${antennas.length} antennas get their port power from the DAS network.`);
   const out = antennas.map((a) => {
     const model = models[a.antennaModelId];
     const key = `${a.antennaModelId}@${carrier.freqMHz}`;
@@ -62,7 +69,7 @@ export function buildCellularRequest(plan, carrierId, { floorIds } = {}) {
       sectorId: sectorOf(a),
       position: toScene(+a.x, elevation.get(a.floorId) + h, +a.z).map((v) => round(v)),
       orientationDeg: orientationDeg(a, model),
-      powerDbm: Number(a.inputPowerDbm),
+      powerDbm: round(das.antennas[a.id]?.powerDbm ?? Number(a.inputPowerDbm), 3),
       pattern: key,
     };
   });

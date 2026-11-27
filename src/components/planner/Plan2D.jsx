@@ -23,6 +23,72 @@ const AP_FONT = 0.4;
 const shortApName = (name) =>
   String(name ?? "").replace(/^AP-detected-(\d+)$/, "AP$1");
 
+
+// Plan symbols. Wi-Fi AP: a filled dot. Cellular antenna: a circle with an X
+// (a wall panel also shows where it points). DAS parts: a source box, a
+// splitter (one in, several out), a coupler (through and tap) and a riser.
+function SourceSymbol({ s, r, stroke, selected }) {
+  const ring = selected ? "#e8790a" : null;
+  if (s.kind === "wifi" || (s.kind !== "cellular" && s.kind !== "das"))
+    return <circle cx={s.x} cy={s.z} r={r} fill="#7c3aed" stroke={ring || "white"} strokeWidth={stroke} />;
+  const x = +s.x;
+  const z = +s.z;
+  const k = r * 0.62;
+  const ink = "#111827";
+  if (s.kind === "cellular") {
+    const az = ((Number(s.azimuthDeg) || 0) * Math.PI) / 180;
+    return (
+      <g>
+        <circle cx={x} cy={z} r={r} fill="white" stroke={ring || ink} strokeWidth={stroke} />
+        <path d={`M${x - k} ${z - k}L${x + k} ${z + k}M${x + k} ${z - k}L${x - k} ${z + k}`} stroke={ink} strokeWidth={stroke * 0.9} />
+        {s.mount === "wall" && (
+          <line x1={x} y1={z} x2={x + Math.cos(az) * r * 1.9} y2={z + Math.sin(az) * r * 1.9} stroke={ink} strokeWidth={stroke} />
+        )}
+      </g>
+    );
+  }
+  const box = (fill) => (
+    <rect x={x - r} y={z - r} width={r * 2} height={r * 2} rx={r * 0.25} fill={fill} stroke={ring || "white"} strokeWidth={stroke} />
+  );
+  if (s.dasType === "source")
+    return (
+      <g>
+        {box("#1e3a8a")}
+        <text x={x} y={z} fontSize={r * 1.05} fontWeight={700} fill="white" textAnchor="middle" dominantBaseline="central" pointerEvents="none">
+          BTS
+        </text>
+      </g>
+    );
+  if (s.dasType === "riser")
+    return (
+      <g>
+        {box(ink)}
+        <path d={`M${x} ${z + k}L${x} ${z - k}M${x - k * 0.6} ${z - k * 0.3}L${x} ${z - k}L${x + k * 0.6} ${z - k * 0.3}`} stroke="white" strokeWidth={stroke} fill="none" />
+      </g>
+    );
+  if (s.dasType === "coupler")
+    return (
+      <g>
+        <rect x={x - r} y={z - r * 0.7} width={r * 2} height={r * 1.4} rx={r * 0.2} fill={ink} stroke={ring || "white"} strokeWidth={stroke} />
+        <text x={x} y={z} fontSize={r * 0.95} fontWeight={700} fill="white" textAnchor="middle" dominantBaseline="central" pointerEvents="none">
+          {String(s.partId || "c").replace(/^c/, "")}
+        </text>
+      </g>
+    );
+  // splitter: one input on the left, outputs fanning to the right
+  return (
+    <g>
+      <circle cx={x} cy={z} r={r} fill={ink} stroke={ring || "white"} strokeWidth={stroke} />
+      <path
+        d={`M${x - k} ${z}L${x - k * 0.1} ${z}M${x - k * 0.1} ${z}L${x + k} ${z - k * 0.7}M${x - k * 0.1} ${z}L${x + k} ${z + k * 0.7}M${x - k * 0.1} ${z}L${x + k} ${z}`}
+        stroke="white"
+        strokeWidth={stroke * 0.9}
+        fill="none"
+      />
+    </g>
+  );
+}
+
 export default function Plan2D({
   plan,
   floorId,
@@ -53,6 +119,9 @@ export default function Plan2D({
   hiddenLayers = [],
   zoom = 1,
   onZoom,
+  // DAS network (cellular): cables drawn on this floor, the part a new cable starts from
+  dasCables = [],
+  cableFrom = null,
 }) {
   const unit = useMeasurementUnit();
   const shown = (id) => !hiddenLayers.includes(id);
@@ -61,6 +130,8 @@ export default function Plan2D({
     panDrag = useRef(null),
     [wallStart, setWallStart] = useState(null),
     [poly, setPoly] = useState([]),
+    // rectangle being drawn: press at one corner, drag to the opposite corner
+    [rectDraft, setRectDraft] = useState(null),
     [pan, setPan] = useState({ x: 0, z: 0 });
   const rooms = plan.rooms.filter((r) => r.floorId === floorId),
     doors = plan.doors.filter((d) => d.floorId === floorId),
@@ -76,6 +147,7 @@ export default function Plan2D({
   useEffect(() => {
     if (tool !== "polygon" && tool !== "boundary") setPoly([]);
     if (tool !== "wall") setWallStart(null);
+    if (tool !== "rectangle") setRectDraft(null);
   }, [tool]);
   const rawLogs = getFloorLogs(plan, floorId);
   const floorImage = plan.images[floorId];
@@ -161,6 +233,11 @@ export default function Plan2D({
   const entity = (type, id) => ({ type, id });
   const down = (e, type, id) => {
     e.stopPropagation();
+    // the Cable tool joins the part or antenna clicked first to the one clicked next
+    if (tool === "dascable" && type === "source") {
+      onPlace("dascable", { id });
+      return;
+    }
     if (tool !== "select") {
       background(e);
       return;
@@ -210,6 +287,11 @@ export default function Plan2D({
       });
       return;
     }
+    if (rectDraft) {
+      const p = point(e);
+      setRectDraft((d) => (d ? { ...d, end: p } : d));
+      return;
+    }
     if (!drag.current) {
       svg.current.style.cursor = e.ctrlKey ? "grab" : "auto";
       return;
@@ -251,6 +333,20 @@ export default function Plan2D({
   };
   const up = (e) => {
     drag.current = null;
+    if (rectDraft) {
+      const end = e && e.type !== "pointercancel" ? point(e) : rectDraft.end;
+      const x = Math.min(rectDraft.start.x, end.x),
+        z = Math.min(rectDraft.start.z, end.z),
+        w = Math.abs(end.x - rectDraft.start.x),
+        d = Math.abs(end.z - rectDraft.start.z);
+      setRectDraft(null);
+      if (e && svg.current.hasPointerCapture(e.pointerId))
+        svg.current.releasePointerCapture(e.pointerId);
+      // a click without a real drag draws nothing
+      if (w >= 0.3 && d >= 0.3)
+        onPlace("rectangle", { x, z, width: w, depth: d });
+      return;
+    }
     if (panDrag.current) {
       panDrag.current = null;
       svg.current.style.cursor = e?.ctrlKey ? "grab" : "auto";
@@ -269,6 +365,11 @@ export default function Plan2D({
     }
     if (tool === "polygon" || tool === "boundary") {
       setPoly([...poly, p]);
+      return;
+    }
+    if (tool === "rectangle") {
+      setRectDraft({ start: p, end: p });
+      svg.current.setPointerCapture(e.pointerId);
       return;
     }
     if (tool === "select") onSelect(null);
@@ -515,8 +616,15 @@ export default function Plan2D({
   return (
     <div className="plan2d">
       {shown("compass") && <PlanCompass alignment={plan.alignment} />}
-      {(poly.length > 0 || wallStart) && (
+      {(poly.length > 0 || wallStart || tool === "rectangle") && (
         <div className="plan-canvas-actions">
+          {tool === "rectangle" && (
+            <span>
+              {rectDraft
+                ? "Release to place the room"
+                : "Press and drag from one corner to the opposite corner"}
+            </span>
+          )}
           {poly.length > 0 && (
             <button onClick={finishPolygon} disabled={poly.length < 3}>
               Finish {tool === "boundary" ? "boundary" : "polygon"} ({poly.length})
@@ -800,20 +908,43 @@ export default function Plan2D({
             ))}
           </g>
         )}
+        {shown("sources") &&
+          dasCables.map((c) => {
+            const on = selected?.type === "dascable" && selected.id === c.id;
+            return (
+              <g key={c.id} onPointerDown={(e) => {
+                e.stopPropagation();
+                if (tool === "select") onSelect(entity("dascable", c.id));
+              }}>
+                {/* wide invisible line: easy to click */}
+                <line x1={c.x1} y1={c.z1} x2={c.x2} y2={c.z2} stroke="transparent" strokeWidth={apR * 1.6} />
+                <line
+                  x1={c.x1}
+                  y1={c.z1}
+                  x2={c.x2}
+                  y2={c.z2}
+                  stroke={on ? "#e8790a" : "#7c3aed"}
+                  strokeWidth={apStroke * (on ? 2.2 : 1.5)}
+                  strokeDasharray={c.otherFloor ? `${apR} ${apR / 2}` : undefined}
+                />
+                {c.port === "tap" && (
+                  <text x={(c.x1 + c.x2) / 2} y={(c.z1 + c.z2) / 2} fontSize={apFont * 0.8} fill="#7c3aed" textAnchor="middle" pointerEvents="none">
+                    tap
+                  </text>
+                )}
+              </g>
+            );
+          })}
         {(shown("sources") ? sources : []).map((s) => (
           <g
             key={s.id}
             onPointerDown={(e) => down(e, "source", s.id)}
             className="draggable"
           >
-            <circle
-              cx={s.x}
-              cy={s.z}
-              r={apR}
-              fill={s.kind === "wifi" ? "#7c3aed" : "#0e7490"}
-              stroke="white"
-              strokeWidth={apStroke}
-            />
+            {cableFrom === s.id && (
+              <circle cx={s.x} cy={s.z} r={apR * 1.8} fill="none" stroke="#e8790a" strokeWidth={apStroke * 1.5} strokeDasharray={`${apR / 2} ${apR / 3}`} />
+            )}
+            <SourceSymbol s={s} r={apR} stroke={apStroke} selected={selected?.type === "source" && selected.id === s.id} />
             {(s.kind !== "wifi" || showWifiNames) && (
               <text
                 x={labelSpots[`s:${s.id}`]?.x ?? s.x}
@@ -987,6 +1118,39 @@ export default function Plan2D({
         {wallStart && (
           <circle cx={wallStart.x} cy={wallStart.z} r=".2" fill="#e8790a" />
         )}
+        {rectDraft && (() => {
+          const x = Math.min(rectDraft.start.x, rectDraft.end.x),
+            z = Math.min(rectDraft.start.z, rectDraft.end.z),
+            w = Math.abs(rectDraft.end.x - rectDraft.start.x),
+            d = Math.abs(rectDraft.end.z - rectDraft.start.z),
+            font = Math.max(0.35, 12 * mPerPx);
+          return (
+            <g pointerEvents="none">
+              <rect
+                x={x}
+                y={z}
+                width={w}
+                height={d}
+                fill="rgba(232,121,10,.12)"
+                stroke="#e8790a"
+                strokeWidth={onScreen(0.08, 2)}
+                strokeDasharray={`${4 * mPerPx} ${3 * mPerPx}`}
+              />
+              {w > 0 && d > 0 && (
+                <text
+                  x={x + w / 2}
+                  y={z + d / 2}
+                  fontSize={font}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fill="#9a4f05"
+                >
+                  {`${formatLength(w, unit)} × ${formatLength(d, unit)}`}
+                </text>
+              )}
+            </g>
+          );
+        })()}
       </svg>
     </div>
   );

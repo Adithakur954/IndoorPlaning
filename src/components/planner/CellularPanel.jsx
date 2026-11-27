@@ -18,6 +18,8 @@ import {
 } from "../../infra/cellular/bands.js";
 import { bandEntry, bandProblems, patternFileFor } from "../../infra/cellular/antennaPattern.js";
 import { parseCatalogue, withPatternFile } from "../../infra/cellular/catalogueImport.js";
+import { AntennaFeed } from "./DasInspector.jsx";
+import { dasParts, dasPowers } from "../../infra/cellular/das.js";
 import {
   antennaModels,
   cellularAntennas,
@@ -108,6 +110,8 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
   };
   const importCatalogue = async (file) => addCatalogue(await file.text(), file.name);
   const defaultModel = defaultAntennaModel(plan);
+  // port powers from the DAS network at the chosen band (antennas without a cable keep their typed power)
+  const dasFeed = carrier && c.cables.length ? dasPowers(plan, carrier) : null;
   const addBand = (preset) => {
     const x = { ...newCarrier(), ...presetCarrierFields(preset) };
     setCellular((cur) => ({ ...cur, carriers: [...cur.carriers, x] }));
@@ -249,6 +253,43 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
         <button type="button" onClick={() => setTool("cellular")}>
           Place antenna
         </button>
+      </section>
+
+      {/* ---------- DAS network: parts and cables that feed the antennas ---------- */}
+      <section className="inspector-section">
+        <h4>DAS network</h4>
+        <div className="segmented" role="group" aria-label="DAS parts">
+          {[
+            ["dassource", "Source"],
+            ["splitter", "Splitter"],
+            ["coupler", "Coupler"],
+            ["riser", "Riser"],
+            ["dascable", "Cable"],
+          ].map(([tool, label]) => (
+            <button key={tool} type="button" onClick={() => setTool(tool)}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="hint">
+          Place a source at the shaft, then splitters and couplers; with Cable, click a part and then the part or antenna
+          it feeds. {dasParts(plan).length} parts, {c.cables.length} cables
+          {carrier && dasFeed ? `, ${Object.keys(dasFeed.antennas).length} of ${allAntennas.length} antennas fed at ${carrierLabel(carrier)}` : ""}.
+        </p>
+        {dasFeed?.errors.map((e) => (
+          <p key={e} className="warn">
+            {e}
+          </p>
+        ))}
+        {dasFeed?.warnings.map((w) => (
+          <p key={w} className="warn">
+            {w}
+          </p>
+        ))}
+      </section>
+
+      {/* ---------- the selected antenna ---------- */}
+      <section className="inspector-section">
         {selected ? (
           <div className="inspector-fields">
             <Field label="Name" value={selected.name} onChange={(v) => patchAntenna({ name: v })} />
@@ -266,12 +307,16 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
               optionLabels={Object.fromEntries(c.sectors.map((s) => [s.id, s.name]))}
               onChange={(v) => patchAntenna({ sectorId: v })}
             />
-            <Field
-              label="Power at the antenna port (dBm)"
-              type="number"
-              value={selected.inputPowerDbm ?? ""}
-              onChange={(v) => patchAntenna({ inputPowerDbm: Number(v) })}
-            />
+            {dasFeed?.antennas[selected.id] ? (
+              <AntennaFeed plan={plan} antenna={selected} carrier={carrier} />
+            ) : (
+              <Field
+                label="Power at the antenna port (dBm)"
+                type="number"
+                value={selected.inputPowerDbm ?? ""}
+                onChange={(v) => patchAntenna({ inputPowerDbm: Number(v) })}
+              />
+            )}
             <Field
               label="Mounting height (m)"
               type="number"
@@ -307,7 +352,8 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
                   (patternFileFor(selectedModel, carrier.freqMHz)
                     ? `At ${carrier.freqMHz} MHz: measured pattern ${patternFileFor(selectedModel, carrier.freqMHz).file}.`
                     : `At ${carrier.freqMHz} MHz: ${bandEntry(selectedModel, carrier.freqMHz).gainDbi} dBi from the datasheet; EIRP ${fmt(
-                        Number(selected.inputPowerDbm) + bandEntry(selectedModel, carrier.freqMHz).gainDbi,
+                        (dasFeed?.antennas[selected.id]?.powerDbm ?? Number(selected.inputPowerDbm)) +
+                          bandEntry(selectedModel, carrier.freqMHz).gainDbi,
                       )} dBm.`)}
               </p>
             )}

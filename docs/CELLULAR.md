@@ -12,7 +12,7 @@ results are not affected by anything in it.
 | 1 | Wi-Fi and cellular separated (scene export by network, own route, own worker, license gate, Wi-Fi staleness ignores antennas) | done |
 | 2 | Catalogue + carriers + antenna patterns → RSRP / SINR map | done |
 | 3 | Several floors: floor heights and alignment | next |
-| 4 | DAS network editor; link-budget power feeds each antenna | to do |
+| 4 | DAS network editor; link-budget power feeds each antenna | editor + calculated port powers done; vendor datasheets for cables / splitters / couplers pending (placeholders) |
 | 5 | BOQ from the network, rule tables, export templates | to do |
 | 6 | Trunking diagram, cellular report | to do |
 | 7 | Sionna SYS (MCS, throughput), several operators | to do |
@@ -35,9 +35,16 @@ results are not affected by anything in it.
 4. **Advanced** (collapsed): sectors (each is its own cell on every band it sends), the antenna
    datasheets, another vendor's catalogue (JSON, format below), measured pattern files (`.msi`,
    win within ±15 % of their frequency) and the prediction settings.
-5. Editor → **Prediction** → **Place antenna**; select one to change its model, sector, port power,
+5. Editor → **Prediction** → **DAS network**: place a **Source** (BTS / repeater, output power per
+   band) at the shaft, **Splitters** (2/3/4-way), **Couplers** (5/7/10/15 dB; first cable = through,
+   second = tap) and **Risers** (where a cable changes floor). With **Cable**, click a part, then
+   the part or antenna it feeds (also on another floor). Cable length = run on the plan + floor
+   height + extra length; loss per frequency from the cable table, plus connectors. Every antenna
+   a source feeds gets its port power from the network (its panel shows the loss chain); the
+   others keep their typed power. Loss values are placeholders until the datasheets are entered.
+6. Editor → **Prediction** → **Place antenna**; select one to change its model, sector, port power,
    height, mounting, azimuth and downtilt.
-6. Press **Prediction**, choose the band and **Run prediction**. The map shows RSRP or SINR of the best
+7. Press **Prediction**, choose the band and **Run prediction**. The map shows RSRP or SINR of the best
    cell; the panel gives the share of the floor at or above the target, median and range.
    Each band keeps its latest run, so switching bands needs no new run.
 

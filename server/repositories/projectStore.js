@@ -146,7 +146,8 @@ export function openProjectStore({ databaseFile, legacyFile }) {
       p.floor_count AS floorCount, p.room_count AS roomCount,
       json_extract(d.plan_json, '$.projectType') AS projectType,
       (SELECT count(*) FROM json_each(d.plan_json, '$.sources')
-        WHERE json_extract(value, '$.kind') IS NOT 'cellular') AS wifiCount,
+        WHERE json_extract(value, '$.kind') NOT IN ('cellular', 'das')
+          OR json_extract(value, '$.kind') IS NULL) AS wifiCount,
       (SELECT count(*) FROM json_each(d.plan_json, '$.sources')
         WHERE json_extract(value, '$.kind') = 'cellular') AS cellularCount
       FROM projects p JOIN project_plans d ON d.project_id = p.id

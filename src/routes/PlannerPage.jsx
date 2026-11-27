@@ -43,6 +43,7 @@ import {
 } from "../utils/logOverlay.js";
 import { num } from "../utils/number.js";
 import DesignPanel from "../components/panels/DesignPanel.jsx";
+import SettingsPanel from "../components/panels/SettingsPanel.jsx";
 import NetworkPanel from "../components/panels/NetworkPanel.jsx";
 import DataPanel from "../components/panels/DataPanel.jsx";
 import AlignmentPanel from "../components/panels/AlignmentPanel.jsx";
@@ -68,15 +69,16 @@ import {
 } from "../services/simulation.js";
 import { COMPARED_BANDS, planForBand } from "../utils/bandVariants.js";
 import { mergeSharedWall, snapCollidingWalls } from "../utils/wallMerge.js";
+import { roomOutlineFromWalls } from "../utils/wallRoom.js";
 import {
   defaultKpiFor,
   kpisForKind,
 } from "../utils/indoorLogKpis.js";
 import { DEFAULT_LEGEND_SECTIONS } from "../components/planner/MapLegend.jsx";
 import { useCellularPrediction } from "../hooks/useCellularPrediction.js";
-import { newAntennaFields } from "../infra/cellular/model.js";
+import { cellularOf, newAntennaFields } from "../infra/cellular/model.js";
+import { DAS_TYPES, cableProblem, newCable, newDasPart } from "../infra/cellular/das.js";
 import { WORKSPACES, useWorkspace, workspaceOf } from "../workspace.js";
-import PropertyMenu from "../components/planner/PropertyMenu.jsx";
 import WorkspaceFooter from "../components/planner/WorkspaceFooter.jsx";
 import { MeasurementUnitProvider } from "../utils/measurementUnits.jsx";
 
@@ -163,14 +165,16 @@ export default function PlannerPage() {
   const workspace = workspaceOf(plan);
   const license = useWorkspace();
   const tabs = workspace === "cellular"
-    ? ["design", "network", "data", "alignment"]
-    : ["design", "network", "data", "alignment", "cabling", "capacity"];
+    ? ["design", "network", "data", "alignment", "settings"]
+    : ["design", "network", "data", "alignment", "cabling", "capacity", "settings"];
   const tab = tabs.includes(section) ? section : "design";
   const setTab = (value) => navigate(`/projects/${projectId}/${value}`);
   // the open tab, for callbacks of work that finishes later (a floor-plan reading)
   const tabRef = useRef(tab);
   tabRef.current = tab;
   const [floorplanBusy, setFloorplanBusy] = useState("");
+  // DAS Cable tool: the part or antenna the next cable starts from
+  const [cableFrom, setCableFrom] = useState(null);
   const [projectName, setProjectName] = useState(""),
     [view, setView] = useState("2d"),
     [tool, setTool] = useState("select"),
@@ -608,6 +612,8 @@ export default function PlannerPage() {
               ? plan.furniture.find((x) => x.id === selected.id)
               : selected?.type === "source"
                 ? plan.sources.find((x) => x.id === selected.id)
+                : selected?.type === "dascable"
+                  ? (plan.cellular?.cables || []).find((x) => x.id === selected.id)
                 : selected?.type === "boundary"
                   ? (plan.boundaries || []).find((x) => x.id === selected.id)
                   : null;
@@ -769,11 +775,20 @@ export default function PlannerPage() {
   };
   const deleteObj = () => {
     if (!selected) return;
+    const id = selected.id;
+    if (selected.type === "dascable") {
+      mutate((p) => ({ ...p, cellular: { ...p.cellular, cables: (p.cellular?.cables || []).filter((c) => c.id !== id) } }));
+      setSelected(null);
+      return;
+    }
     const list = listKey[selected.type];
-    mutate((p) => ({
-      ...p,
-      [list]: p[list].filter((x) => x.id !== selected.id),
-    }));
+    mutate((p) => {
+      const next = { ...p, [list]: p[list].filter((x) => x.id !== id) };
+      // a removed DAS part or antenna takes its cables with it
+      if (selected.type === "source" && p.cellular?.cables?.some((c) => c.from === id || c.to === id))
+        next.cellular = { ...p.cellular, cables: p.cellular.cables.filter((c) => c.from !== id && c.to !== id) };
+      return next;
+    });
     setSelected(null);
   };
   const selectEntity = (entity) => {
@@ -877,8 +892,9 @@ export default function PlannerPage() {
         shape: kind,
         x: p.x,
         z: p.z,
-        width: 5,
-        depth: 4,
+        // a dragged rectangle brings its own size
+        width: Number(p.width) > 0 ? +p.width : 5,
+        depth: Number(p.depth) > 0 ? +p.depth : 4,
         height: 3,
         material: "drywall",
       };
@@ -922,6 +938,44 @@ export default function PlannerPage() {
       }));
       selectEntity({ type: "boundary", id: boundary.id });
       setTool("select");
+    }
+    const dasType = { dassource: "source", splitter: "splitter", coupler: "coupler", riser: "riser" }[kind];
+    if (dasType && DAS_TYPES[dasType]) {
+      const s = newDasPart(plan, dasType, floorId, p, uid());
+      mutate((old) => ({ ...old, sources: [...old.sources, s] }));
+      selectEntity({ type: "source", id: s.id });
+    }
+    if (kind === "dascable") {
+      const name = (id) => plan.sources.find((s) => s.id === id)?.name || "part";
+      if (!p.id) {
+        // a click on empty plan ends the cable being drawn
+        if (cableFrom) setMessage("Cable cancelled.");
+        setCableFrom(null);
+        return;
+      }
+      if (!cableFrom) {
+        const start = plan.sources.find((s) => s.id === p.id);
+        if (start?.kind === "cellular") {
+          setMessage(`${start.name} is an antenna: start the cable at a source, splitter, coupler or riser.`);
+          return;
+        }
+        setCableFrom(p.id);
+        setMessage(`Cable from ${name(p.id)}: click the part or antenna it goes to (other floors too).`);
+        return;
+      }
+      const problem = cableProblem(plan, cableFrom, p.id);
+      if (problem) {
+        setMessage(problem);
+        return;
+      }
+      const c = newCable(plan, cableFrom, p.id, uid());
+      mutate((old) => {
+        const cur = cellularOf(old);
+        return { ...old, cellular: { ...(old.cellular || {}), ...cur, cables: [...cur.cables, c] } };
+      });
+      setMessage(`Cable ${name(cableFrom)} → ${name(p.id)} added. Click the next start, or Cursor to stop.`);
+      setCableFrom(null);
+      return;
     }
     if (kind === "cellular" || kind === "wifi") {
       const s = {
@@ -1426,6 +1480,137 @@ export default function PlannerPage() {
     }));
     selectEntity({ type: "boundary", id: boundary.id });
   };
+  // Walls drawn one by one become a room: the walls joined end to end with the
+  // chosen one give the outline (an open chain is closed with a straight side).
+  // Those loose walls are removed, as the room draws its own walls.
+  const makeRoomFromWalls = (wallId) => {
+    const wall = plan.interiorWalls.find((w) => w.id === wallId);
+    if (!wall) return;
+    const walls = plan.interiorWalls.filter((w) => w.floorId === wall.floorId);
+    const tolerance = Math.max(0.3, Number(plan.wallThickness) || 0.2);
+    const found = roomOutlineFromWalls(walls, wallId, tolerance);
+    if (found.error) {
+      setMessage(found.error);
+      return;
+    }
+    const used = walls.filter((w) => found.wallIds.includes(w.id));
+    const counts = {};
+    for (const w of used) counts[w.material || "drywall"] = (counts[w.material || "drywall"] || 0) + 1;
+    const material = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
+    const xs = found.points.map((q) => q.x),
+      zs = found.points.map((q) => q.z);
+    const x = Math.min(...xs),
+      z = Math.min(...zs),
+      maxX = Math.max(...xs),
+      maxZ = Math.max(...zs);
+    const upright =
+      found.points.length === 4 &&
+      found.points.every(
+        (q) =>
+          (Math.abs(q.x - x) < 1e-6 || Math.abs(q.x - maxX) < 1e-6) &&
+          (Math.abs(q.z - z) < 1e-6 || Math.abs(q.z - maxZ) < 1e-6),
+      );
+    const room = {
+      id: uid(),
+      floorId: wall.floorId,
+      name: `Room ${plan.rooms.length + 1}`,
+      shape: upright ? "rectangle" : "polygon",
+      x,
+      z,
+      width: maxX - x,
+      depth: maxZ - z,
+      height: Math.max(...used.map((w) => Number(w.height) || 0), 0) || 3,
+      material,
+      ...(upright ? {} : { polygonPoints: found.points.map((q) => ({ x: q.x, z: q.z })) }),
+    };
+    const gone = new Set(found.wallIds);
+    mutate((p) => ({
+      ...p,
+      interiorWalls: p.interiorWalls.filter((w) => !gone.has(w.id)),
+      rooms: [...p.rooms, room],
+    }));
+    selectEntity({ type: "room", id: room.id });
+    setMessage(
+      found.closed
+        ? `${room.name} made from ${used.length} walls.`
+        : `${room.name} made from ${used.length} walls; the open side was closed with a straight wall.`,
+    );
+  };
+  // Splits an upright rectangle room into four equal quarter rooms (NW, NE,
+  // SW, SE). Outer walls keep their materials, doors and windows move to the
+  // quarter whose side they sit on; the new inner walls use the room material.
+  const splitRoomInFour = (roomId) => {
+    const room = plan.rooms.find((r) => r.id === roomId);
+    if (!room || (room.shape && room.shape !== "rectangle")) return;
+    const x0 = +room.x,
+      z0 = +room.z,
+      hw = +room.width / 2,
+      hd = +room.depth / 2;
+    if (!(hw > 0 && hd > 0)) return;
+    const quarters = [
+      { key: "nw", x: x0, z: z0, sides: ["north", "west"] },
+      { key: "ne", x: x0 + hw, z: z0, sides: ["north", "east"] },
+      { key: "sw", x: x0, z: z0 + hd, sides: ["south", "west"] },
+      { key: "se", x: x0 + hw, z: z0 + hd, sides: ["south", "east"] },
+    ].map((q, i) => ({
+      ...q,
+      room: {
+        ...room,
+        id: uid(),
+        name: `${room.name || "Room"} ${i + 1}`,
+        shape: "rectangle",
+        x: q.x,
+        z: q.z,
+        width: hw,
+        depth: hd,
+      },
+    }));
+    const byKey = Object.fromEntries(quarters.map((q) => [q.key, q.room]));
+    const SIDES = ["north", "east", "south", "west"];
+    const moveOpening = (o) => {
+      if (o.roomId !== roomId) return o;
+      const side =
+        o.wallSide || (Number.isInteger(+o.edgeIndex) ? SIDES[+o.edgeIndex] : "north");
+      const along = side === "north" || side === "south";
+      const half = along ? hw : hd;
+      const width = Number(o.width) || 0;
+      const start = Number(o.offset) || 0;
+      const second = start + width / 2 >= half;
+      const key = along
+        ? (side === "north" ? "n" : "s") + (second ? "e" : "w")
+        : (second ? "s" : "n") + (side === "west" ? "w" : "e");
+      const offset = Math.max(
+        0,
+        Math.min(start - (second ? half : 0), half - width),
+      );
+      const { edgeIndex, ...rest } = o;
+      return { ...rest, roomId: byKey[key].id, wallSide: side, offset };
+    };
+    mutate((p) => {
+      const wallTypes = Object.fromEntries(
+        Object.entries(p.wallTypes || {}).filter(
+          ([k]) => k.split(":")[0] !== roomId,
+        ),
+      );
+      for (const q of quarters)
+        for (const side of q.sides) {
+          const m = (p.wallTypes || {})[`${roomId}:${side}`];
+          if (m) wallTypes[`${q.room.id}:${side}`] = m;
+        }
+      return {
+        ...p,
+        rooms: [
+          ...p.rooms.filter((r) => r.id !== roomId),
+          ...quarters.map((q) => q.room),
+        ],
+        doors: p.doors.map(moveOpening),
+        windows: p.windows.map(moveOpening),
+        wallTypes,
+      };
+    });
+    selectEntity({ type: "room", id: quarters[0].room.id });
+    setMessage(`${room.name || "Room"} split into four rooms.`);
+  };
   // Panel position fields: top-left of the boundary's bounding box.
   const boundaryCorner = (b) => ({
     x: Math.min(...b.points.map((q) => q.x)),
@@ -1738,8 +1923,28 @@ Cancel: ${what} of the optimised design instead.`,
     collisionFocus,
   ]);
   const cableDesign = useCableOverlay(plan, showCables);
+  useEffect(() => {
+    if (tool !== "dascable") setCableFrom(null);
+  }, [tool]);
+  // DAS cables with an end on this floor (dashed when the other end is on another floor)
+  const dasCables = useMemo(() => {
+    const at = new Map(plan.sources.map((s) => [s.id, s]));
+    return (plan.cellular?.cables || []).flatMap((c) => {
+      const a = at.get(c.from);
+      const b = at.get(c.to);
+      if (!a || !b || (a.floorId !== floorId && b.floorId !== floorId)) return [];
+      const here = a.floorId === floorId ? a : b;
+      const there = here === a ? b : a;
+      const otherFloor = a.floorId !== b.floorId;
+      // a cable to another floor is drawn as a short stub from its end on this floor
+      const end = otherFloor ? { x: +here.x + 1.2, z: +here.z - 1.2 } : { x: +there.x, z: +there.z };
+      return [{ id: c.id, port: c.port, otherFloor, x1: +here.x, z1: +here.z, x2: end.x, z2: end.z }];
+    });
+  }, [plan.sources, plan.cellular?.cables, floorId]);
   const measurementUnit = plan.property?.unit || "m";
   const panelProps = {
+    dasCables,
+    cableFrom,
     tool,
     setTool,
     view,
@@ -1843,6 +2048,8 @@ Cancel: ${what} of the optimised design instead.`,
     prediction,
     nestedNotes,
     convertRoomToBoundary,
+    splitRoomInFour,
+    makeRoomFromWalls,
     convertBoundaryToRoom,
     moveBoundaryTo,
     optimization,
@@ -1977,6 +2184,7 @@ Cancel: ${what} of the optimised design instead.`,
               ["alignment", "⌖", "Geo alignment"],
               ["cabling", "⌇", "Cabling"],
               ["capacity", "▤", "Capacity"],
+              ["settings", "⚙", "Settings"],
             ].filter(([id]) => tabs.includes(id)).map(([id, icon, label]) => (
               <button
                 key={id}
@@ -2092,10 +2300,6 @@ Cancel: ${what} of the optimised design instead.`,
               <EditorMenu
                 active={panelMode === "tools"}
                 onOpen={() => openRightPanel("tools")}
-              />
-              <PropertyMenu
-                active={panelMode === "property"}
-                onOpen={() => openRightPanel("property")}
               />
               {workspace === "cellular" ? (
                 <button
@@ -2289,6 +2493,7 @@ Cancel: ${what} of the optimised design instead.`,
             </div>
             {tab === "alignment" && <AlignmentPanel {...panelProps} />}
             {tab === "cabling" && <CablingPanel {...panelProps} projectName={projectName} />}
+            {tab === "settings" && <SettingsPanel {...panelProps} />}
             {tab === "capacity" && <CapacityPanel {...panelProps} rtMaps={rt.active ? rt.maps : null} />}
           </main>
         </div>

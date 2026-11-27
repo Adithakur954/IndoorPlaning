@@ -38,6 +38,9 @@ export const DEFAULT_SETTINGS = {
   rsrpColors: null, // null: RSRP_LEGEND.colors when the edges have its length
   sinrEdgesDb: [0, 5, 10, 20],
   sinrColors: null,
+  // how the map is coloured: "smooth" blends the colours between the edges (as
+  // the design tool's legend), "bands" gives one flat colour per band
+  mapStyle: "smooth",
 };
 
 // RSRP colour scale of the supplied design (10 bands, dBm), lowest band first.
@@ -92,7 +95,7 @@ export function mapRanges(plan, metric) {
     const min = i === 0 ? -Infinity : edges[i - 1];
     const max = i === edges.length ? Infinity : edges[i];
     const label = i === 0 ? `< ${max} ${unit}` : i === edges.length ? `≥ ${min} ${unit}` : `${min} to ${max} ${unit}`;
-    return { min, max, color, label };
+    return { min, max, color, label, smooth: s.mapStyle !== "bands" };
   });
 }
 
@@ -113,6 +116,8 @@ export function cellularOf(plan) {
     catalogue: { antennas: { ...(c.catalogue?.antennas || {}) } },
     carriers: Array.isArray(c.carriers) ? c.carriers : [],
     sectors: Array.isArray(c.sectors) && c.sectors.length ? c.sectors : [{ id: "sector-1", name: "Sector 1" }],
+    // DAS cables between parts (plan sources of kind "das") and antennas, see das.js
+    cables: Array.isArray(c.cables) ? c.cables : [],
     settings: upgradeSettings({ ...DEFAULT_SETTINGS, ...(c.settings || {}) }),
     prediction: c.prediction,
   };

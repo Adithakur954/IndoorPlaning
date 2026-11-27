@@ -424,7 +424,7 @@ function Scene({
 }) {
   const shown = (id) => !hiddenLayers.includes(id);
   const rooms = plan.rooms.filter((r) => r.floorId === floorId),
-    sources = plan.sources.filter((s) => s.floorId === floorId),
+    sources = plan.sources.filter((s) => s.floorId === floorId && s.kind !== "das"),
     walls = plan.interiorWalls.filter((w) => w.floorId === floorId),
     furniture = plan.furniture.filter((f) => f.floorId === floorId);
   // drawing layer of each room floor: largest first (0), smaller ones over it

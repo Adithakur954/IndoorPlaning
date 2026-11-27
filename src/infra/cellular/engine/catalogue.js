@@ -18,14 +18,14 @@ export const DEFAULT_CATALOGUE = {
       id: "7/8",
       name: '7/8" low-loss cable',
       maxPowerW: 500,
-      lossDbPer100m: table([[700, 2.2], [900, 2.5], [1800, 3.6], [2100, 3.9], [2600, 4.5]]),
+      lossDbPer100m: table([[700, 2.2], [900, 2.5], [1800, 3.6], [2100, 3.9], [2600, 4.5], [3500, 5.4], [3800, 5.7]]),
       source: ILLUSTRATIVE,
     },
     "1/2": {
       id: "1/2",
       name: '1/2" low-loss cable',
       maxPowerW: 250,
-      lossDbPer100m: table([[700, 3.7], [900, 4.2], [1800, 6.0], [2100, 6.6], [2600, 7.6]]),
+      lossDbPer100m: table([[700, 3.7], [900, 4.2], [1800, 6.0], [2100, 6.6], [2600, 7.6], [3500, 9.0], [3800, 9.4]]),
       source: ILLUSTRATIVE,
     },
   },
@@ -38,6 +38,7 @@ export const DEFAULT_CATALOGUE = {
   splitters: {
     s2: { id: "s2", name: "2-way splitter", ways: 2, excessLossDb: 0.3, maxPowerW: 200, source: ILLUSTRATIVE },
     s3: { id: "s3", name: "3-way splitter", ways: 3, excessLossDb: 0.3, maxPowerW: 200, source: ILLUSTRATIVE },
+    s4: { id: "s4", name: "4-way splitter", ways: 4, excessLossDb: 0.4, maxPowerW: 200, source: ILLUSTRATIVE },
   },
   inline: {
     combiner: { id: "combiner", name: "combiner (series loss)", lossDb: 0.5, maxPowerW: 200, source: ILLUSTRATIVE },

@@ -7,7 +7,6 @@ import Plan2D from "../planner/Plan2D.jsx";
 import Plan3D from "../planner/Plan3D.jsx";
 import RoomMaterials from "../planner/RoomMaterials.jsx";
 import { EditorToolOptions } from "../planner/EditorMenu.jsx";
-import { PropertyOptions } from "../planner/PropertyMenu.jsx";
 import Field from "../ui/Field.jsx";
 import { formatArea, useMeasurementUnit } from "../../utils/measurementUnits.jsx";
 
@@ -22,9 +21,10 @@ const getPanelMaxWidth = () =>
 import MapLegend from "../planner/MapLegend.jsx";
 import CellularPanel from "../planner/CellularPanel.jsx";
 import CellularLegend from "../planner/CellularLegend.jsx";
+import { DasCableInspector, DasPartInspector } from "../planner/DasInspector.jsx";
+import { DAS_TYPES } from "../../infra/cellular/das.js";
 import PredictionPanel from "../planner/PredictionPanel.jsx";
 import OptimizationPanel from "../planner/OptimizationPanel.jsx";
-import MaterialsEditor from "../planner/MaterialsEditor.jsx";
 import { uid } from "../../models/plan.js";
 import { areaOf, pointsOf, resizePolygonPoints } from "../../utils/geometry.js";
 import { num } from "../../utils/number.js";
@@ -68,6 +68,8 @@ export default function DesignPanel({
   setTab,
   nestedNotes = [],
   convertRoomToBoundary,
+  splitRoomInFour,
+  makeRoomFromWalls,
   convertBoundaryToRoom,
   moveBoundaryTo,
   heatmap,
@@ -88,17 +90,6 @@ export default function DesignPanel({
   warnings,
   panelMode,
   setPanelMode,
-  carpetArea,
-  isCustomCarpetArea,
-  onCarpetAreaChange,
-  onCarpetAreaReset,
-  carpetFit,
-  boundaryAreaM2,
-  carpetLengthM,
-  carpetWidthM,
-  onCarpetSize,
-  onCarpetFitBoundary,
-  onStaticChange,
   moveWithContents,
   mapMode,
   hiddenLayers,
@@ -108,10 +99,6 @@ export default function DesignPanel({
   setMoveWithContents,
   setMapMode,
   rotateSelected,
-  rotateWholeBuilding,
-  onShowRoomNamesChange,
-  onShowFurnitureNamesChange,
-  onShowWifiNamesChange,
   draftRooms,
   draftWalls,
   draftFurniture,
@@ -121,6 +108,8 @@ export default function DesignPanel({
   discardDraft,
   workspace = "wifi",
   cellular,
+  dasCables = [],
+  cableFrom = null,
 }) {
   const unit = useMeasurementUnit();
   const [panelWidth, setPanelWidthState] = useState(() => {
@@ -277,6 +266,8 @@ export default function DesignPanel({
                 aggregation,
                 draft,
                 hiddenLayers,
+                dasCables,
+                cableFrom,
               }}
             />
           )}
@@ -339,8 +330,12 @@ export default function DesignPanel({
                     ? "Prediction"
                   : panelMode === "optimize"
                     ? "Optimise AP placement"
-                  : panelMode === "property"
-                    ? "Project properties"
+                    : obj && selected.type === "dascable"
+                      ? "Cable properties"
+                    : obj && obj.kind === "das"
+                      ? `${DAS_TYPES[obj.dasType]?.label || "DAS part"} properties`
+                    : obj && obj.kind === "cellular"
+                      ? "Antenna properties"
                     : obj
                       ? `${selected.type[0].toUpperCase() + selected.type.slice(1)} properties`
                       : "Floor properties"}
@@ -413,44 +408,15 @@ export default function DesignPanel({
                 predictionRanges={predictionRanges}
                 weakBelowDbm={weakBelowDbm}
               />
-            ) : panelMode === "property" ? (
-              <>
-              <PropertyOptions
-                workspace={workspace}
-                unit={plan.property?.unit || "m"}
-                onUnitChange={(unit) =>
-                  mutate((p) => ({
-                    ...p,
-                    property: { ...p.property, unit },
-                  }))
-                }
-                carpetArea={carpetArea}
-                isCustom={isCustomCarpetArea}
-                isStatic={isStatic}
-                onStaticChange={onStaticChange}
-                showRoomNames={showRoomNames}
-                onShowRoomNamesChange={onShowRoomNamesChange}
-                showFurnitureNames={showFurnitureNames}
-                onShowFurnitureNamesChange={onShowFurnitureNamesChange}
-                showWifiNames={showWifiNames}
-                onShowWifiNamesChange={onShowWifiNamesChange}
-                onChange={onCarpetAreaChange}
-                onReset={onCarpetAreaReset}
-                fit={carpetFit}
-                boundaryAreaM2={boundaryAreaM2}
-                lengthM={carpetLengthM}
-                widthM={carpetWidthM}
-                onSize={onCarpetSize}
-                onFitBoundary={onCarpetFitBoundary}
-                onRotateBuilding={rotateWholeBuilding}
-              />
-              <MaterialsEditor plan={plan} mutate={mutate} />
-              </>
             ) : obj ? (
               <>
                 <div className="inspector-fields">
                   {(selected.type === "room"
                     ? roomFieldKeys
+                    : selected.type === "dascable"
+                      ? [] // DasCableInspector below
+                    : selected.type === "source" && obj.kind === "das"
+                      ? ["name", "x", "z"]
                     : selected.type === "source" && workspace === "cellular"
                       ? ["name", "x", "z", "heightM"] // the rest is in the Cellular panel
                     : selected.type === "source"
@@ -724,7 +690,13 @@ export default function DesignPanel({
                 {selected.type === "room" && (
                   <RoomMaterials room={obj} plan={plan} mutate={mutate} />
                 )}
-                {selected.type === "source" && workspace === "cellular" && (
+                {selected.type === "source" && obj.kind === "das" && (
+                  <DasPartInspector plan={plan} part={obj} mutate={mutate} cellular={cellular} />
+                )}
+                {selected.type === "dascable" && (
+                  <DasCableInspector plan={plan} cable={obj} mutate={mutate} cellular={cellular} onDelete={deleteObj} />
+                )}
+                {selected.type === "source" && obj.kind === "cellular" && (
                   <button type="button" className="secondary-button" onClick={() => setPanelMode("cellular")}>
                     Antenna model, sector, power and direction →
                   </button>
@@ -803,6 +775,27 @@ export default function DesignPanel({
                     ))}
                   </div>
                 )}
+                {selected.type === "wall" && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    title="Makes one room from this wall and the walls joined to it end to end. An open chain (e.g. three sides) is closed with a straight side. The loose walls are replaced by the room's own walls."
+                    onClick={() => makeRoomFromWalls(obj.id)}
+                  >
+                    Make room from walls
+                  </button>
+                )}
+                {selected.type === "room" &&
+                  (!obj.shape || obj.shape === "rectangle") && (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      title="Divides this room into four equal rooms (two by two). Outer wall materials, doors and windows are kept."
+                      onClick={() => splitRoomInFour(obj.id)}
+                    >
+                      Split into 4 rooms
+                    </button>
+                  )}
                 {selected.type === "room" && (
                   <button
                     type="button"
