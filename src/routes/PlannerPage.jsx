@@ -2012,13 +2012,24 @@ Cancel: ${what} of the optimised design instead.`,
     if (!dasCarrier || !(plan.cellular?.cables || []).length) return {};
     return Object.fromEntries(Object.entries(dasPowers(plan, dasCarrier).antennas).map(([id, a]) => [id, a.powerDbm]));
   }, [plan, dasCarrier]);
-  const dasPorts = useMemo(
-    () =>
-      Object.fromEntries(
-        plan.sources.filter((s) => s.kind === "das" && s.floorId === floorId).map((s) => [s.id, partOutputs(plan, s)]),
-      ),
-    [plan, floorId],
-  );
+  // connectors of each DAS part and antenna on this floor: its input (used or free) and its outputs
+  const dasPorts = useMemo(() => {
+    const cables = plan.cellular?.cables || [];
+    return Object.fromEntries(
+      plan.sources
+        .filter((s) => (s.kind === "das" || s.kind === "cellular") && s.floorId === floorId)
+        .map((s) => {
+          const outs = s.kind === "das" ? partOutputs(plan, s) : { total: 0, used: 0, ports: [] };
+          return [
+            s.id,
+            {
+              ...outs,
+              input: s.dasType === "source" ? null : { label: s.kind === "cellular" ? "Ant" : "In", used: cables.some((c) => c.to === s.id) },
+            },
+          ];
+        }),
+    );
+  }, [plan, floorId]);
   // hover text of each DAS part and antenna: its ports, what they join and the connector
   const portInfo = useMemo(() => {
     if (workspace !== "cellular") return {};

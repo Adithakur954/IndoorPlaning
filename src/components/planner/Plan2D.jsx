@@ -27,6 +27,40 @@ const shortApName = (name) =>
 
 const DAS_PLACING_TOOLS = ["dassource", "splitter", "coupler", "combiner", "riser"];
 
+
+// One connector of a DAS part or antenna while drawing a cable: a small square,
+// orange when free to connect, grey when a cable already uses it.
+function Connector({ x, z, size, free, label, side, font, stroke }) {
+  return (
+    <g>
+      <rect
+        x={x - size / 2}
+        y={z - size / 2}
+        width={size}
+        height={size}
+        rx={size * 0.15}
+        fill={free ? "#f97316" : "#9ca3af"}
+        stroke="white"
+        strokeWidth={stroke * 0.6}
+      />
+      {label && (
+        <text
+          x={side === "left" ? x - size : x + size}
+          y={z}
+          fontSize={font}
+          fontWeight={700}
+          fill={free ? "#c2410c" : "#6b7280"}
+          textAnchor={side === "left" ? "end" : "start"}
+          dominantBaseline="middle"
+          className="plan-label"
+        >
+          {label}
+        </text>
+      )}
+    </g>
+  );
+}
+
 // Plan symbols. Wi-Fi AP: a filled dot. Cellular antenna: a circle with an X
 // (a wall panel also shows where it points). DAS parts: a source box, a
 // splitter (one in, several out), a coupler (through and tap) and a riser.
@@ -151,7 +185,9 @@ export default function Plan2D({
     [poly, setPoly] = useState([]),
     // rectangle being drawn: press at one corner, drag to the opposite corner
     [rectDraft, setRectDraft] = useState(null),
-    [pan, setPan] = useState({ x: 0, z: 0 });
+    [pan, setPan] = useState({ x: 0, z: 0 }),
+    // the DAS part or antenna under the pointer while drawing a cable
+    [hoverId, setHoverId] = useState(null);
   const rooms = plan.rooms.filter((r) => r.floorId === floorId),
     doors = plan.doors.filter((d) => d.floorId === floorId),
     windows = plan.windows.filter((w) => w.floorId === floorId),
@@ -977,17 +1013,27 @@ export default function Plan2D({
             ))}
           </g>
         )}
-        {(shown("sources") ? sources : []).map((s) => (
+        {(shown("sources") ? sources : []).map((s) => {
+          const ports = tool === "dascable" ? dasPorts[s.id] : null;
+          // the item under the pointer and the cable's start pop out while drawing a cable
+          const big = Boolean(ports) && (hoverId === s.id || cableFrom === s.id);
+          const k = big ? 1.45 : 1;
+          return (
           <g
             key={s.id}
             onPointerDown={(e) => down(e, "source", s.id)}
-            className="draggable"
+            onPointerEnter={ports ? () => setHoverId(s.id) : undefined}
+            onPointerLeave={ports ? () => setHoverId((h) => (h === s.id ? null : h)) : undefined}
+            className={ports ? "das-connectable" : "draggable"}
           >
             {cableFrom === s.id && (
               <circle cx={s.x} cy={s.z} r={apR * 1.8} fill="none" stroke="#e8790a" strokeWidth={apStroke * 1.5} strokeDasharray={`${apR / 2} ${apR / 3}`} />
             )}
             {portInfo[s.id] && <title>{portInfo[s.id]}</title>}
-            <SourceSymbol s={s} r={apR} stroke={apStroke} selected={selected?.type === "source" && selected.id === s.id} />
+            {big && <circle cx={s.x} cy={s.z} r={apR * 2.1} fill="#e8790a" fillOpacity="0.14" stroke="#e8790a" strokeWidth={apStroke} />}
+            <g transform={big ? `translate(${s.x} ${s.z}) scale(${k}) translate(${-s.x} ${-s.z})` : undefined}>
+              <SourceSymbol s={s} r={apR} stroke={apStroke} selected={selected?.type === "source" && selected.id === s.id} />
+            </g>
             {(s.kind !== "wifi" || showWifiNames) && (
               <text
                 x={labelSpots[`s:${s.id}`]?.x ?? s.x}
@@ -1018,24 +1064,40 @@ export default function Plan2D({
                 {antennaPowers[s.id].toFixed(1)} dBm
               </text>
             )}
-            {tool === "dascable" && dasPorts[s.id] && (
-              // outputs of the part: filled = used, open = free (a full part takes no more cables)
+            {ports && (
+              // connectors: the input on the left, the outputs on the right;
+              // orange = free to connect, grey = used (named when the item pops out)
               <g pointerEvents="none">
-                {Array.from({ length: dasPorts[s.id].total }, (_, i) => (
-                  <circle
-                    key={i}
-                    cx={+s.x + apR * 1.5}
-                    cy={+s.z + (i - (dasPorts[s.id].total - 1) / 2) * apR * 0.8}
-                    r={apR * 0.28}
-                    fill={i < dasPorts[s.id].used ? "#7c3aed" : "white"}
-                    stroke="#7c3aed"
-                    strokeWidth={apStroke * 0.7}
+                {ports.input && (
+                  <Connector
+                    x={+s.x - apR * k * 1.55}
+                    z={+s.z}
+                    size={apR * (big ? 0.62 : 0.42)}
+                    free={!ports.input.used}
+                    label={big ? ports.input.label : null}
+                    side="left"
+                    font={apFont * 0.75}
+                    stroke={apStroke}
+                  />
+                )}
+                {(ports.ports || []).map((port, i) => (
+                  <Connector
+                    key={port.id}
+                    x={+s.x + apR * k * 1.55}
+                    z={+s.z + (i - (ports.ports.length - 1) / 2) * apR * (big ? 1.05 : 0.8)}
+                    size={apR * (big ? 0.62 : 0.42)}
+                    free={!port.cableId}
+                    label={big ? port.label : null}
+                    side="right"
+                    font={apFont * 0.75}
+                    stroke={apStroke}
                   />
                 ))}
               </g>
             )}
           </g>
-        ))}
+          );
+        })}
         {(shown("boundary") ? plan.boundaries || [] : [])
           .filter((b) => b.floorId === floorId)
           .map((b) => (

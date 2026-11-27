@@ -3048,3 +3048,8 @@ p.warn {
 .das-toolbar small {
   color: #5f736c;
 }
+
+/* a DAS part or antenna while drawing a cable: it can be clicked to connect */
+.das-connectable {
+  cursor: crosshair;
+}
