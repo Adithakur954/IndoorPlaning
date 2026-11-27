@@ -14,6 +14,7 @@ import {
   connectorOf,
   dasPowers,
   outputPorts,
+  portsOf,
 } from "../../infra/cellular/das.js";
 
 const fmt = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : "–");
@@ -225,25 +226,42 @@ export function AntennaFeed({ plan, antenna, carrier }) {
 // state of the cable being drawn.
 export const DAS_TOOL_IDS = ["dassource", "splitter", "coupler", "combiner", "riser", "dascable"];
 
-export function DasToolBar({ tool, plan, dasOptions, setDasOptions, cableFrom, cablePoints = [], cancelCable, undoCableBend, portPick, choosePort }) {
+export function DasToolBar({
+  tool,
+  plan,
+  dasOptions,
+  setDasOptions,
+  cableFrom,
+  cablePoints = [],
+  cancelCable,
+  undoCableBend,
+  cablePick,
+  cableStartPort,
+  chooseCableEnd,
+}) {
   if (!DAS_TOOL_IDS.includes(tool)) return null;
   const nameOf = (id) => plan.sources.find((s) => s.id === id)?.name || "?";
-  if (tool === "dascable" && portPick)
+  const pickItem = tool === "dascable" && cablePick ? plan.sources.find((s) => s.id === cablePick) : null;
+  if (pickItem)
     return (
-      <div className="das-toolbar" role="toolbar" aria-label="Choose the output">
-        <strong>
-          {nameOf(portPick.from)} → {nameOf(portPick.to)}
-        </strong>
-        <small>Which output?</small>
+      <div className="das-toolbar" role="toolbar" aria-label="Choose the end">
+        <strong>{pickItem.name}</strong>
+        <small>{cableStartPort ? "Connect to which end?" : "Start the cable at which end?"}</small>
         <div className="segmented" role="group">
-          {portPick.options.map((o) => {
-            const part = plan.sources.find((s) => s.id === portPick.from);
-            const cp = DEFAULT_CATALOGUE.couplers[part?.partId];
+          {portsOf(plan, pickItem).map((o) => {
+            const cp = pickItem.dasType === "coupler" ? DEFAULT_CATALOGUE.couplers[pickItem.partId] : null;
             const loss = cp ? (o.id === "tap" ? couplerTapLossDb(cp) : o.id === "through" ? couplerThroughLossDb(cp) : null) : null;
             return (
-              <button key={o.id} type="button" onClick={() => choosePort(o.id)}>
+              <button
+                key={o.id}
+                type="button"
+                disabled={Boolean(o.other)}
+                title={o.other ? `used: ${o.dir === "in" ? "from" : "to"} ${o.other}` : "free"}
+                onClick={() => chooseCableEnd({ id: pickItem.id, port: o.id, dir: o.dir })}
+              >
                 {o.label}
                 {Number.isFinite(loss) ? ` (−${fmt(loss)} dB)` : ""}
+                {o.other ? " · used" : ""}
               </button>
             );
           })}
@@ -308,9 +326,11 @@ export function DasToolBar({ tool, plan, dasOptions, setDasOptions, cableFrom, c
             ["jumper", "Jumper 1 m", DEFAULT_CATALOGUE.cables.jumper.model],
           ])}
           <small>
-            {start
-              ? `At ${start.name}: click corners along the route${cablePoints.length ? ` (${cablePoints.length} so far)` : ""}, then the other end.`
-              : "Click one end: a part or an antenna (either order)."}
+            {start && cableStartPort
+              ? `From ${start.name} ${portsOf(plan, start).find((p) => p.id === cableStartPort.port)?.label || ""}: click corners along the route${
+                  cablePoints.length ? ` (${cablePoints.length} so far)` : ""
+                }, then the other antenna or part and its end.`
+              : "Click an antenna or part, then the end (orange square) the cable starts at."}
           </small>
           {start && cablePoints.length > 0 && (
             <button type="button" onClick={undoCableBend}>

@@ -3053,3 +3053,8 @@ p.warn {
 .das-connectable {
   cursor: crosshair;
 }
+
+/* an end of a DAS part or antenna that can be clicked to connect a cable */
+.das-end {
+  cursor: pointer;
+}

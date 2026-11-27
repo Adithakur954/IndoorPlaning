@@ -32,16 +32,28 @@ const DAS_PLACING_TOOLS = ["dassource", "splitter", "coupler", "combiner", "rise
 
 // One connector of a DAS part or antenna while drawing a cable: a small square,
 // orange when free to connect, grey when a cable already uses it.
-function Connector({ x, z, size, free, label, side, font, stroke }) {
+function Connector({ x, z, size, free, label, side, font, stroke, chosen, onPick }) {
   return (
-    <g>
+    <g
+      className={onPick && free ? "das-end" : undefined}
+      onPointerDown={
+        onPick
+          ? (e) => {
+              e.stopPropagation();
+              onPick();
+            }
+          : undefined
+      }
+    >
+      {/* a wider invisible square: easy to hit */}
+      {onPick && <rect x={x - size} y={z - size} width={size * 2} height={size * 2} fill="transparent" />}
       <rect
         x={x - size / 2}
         y={z - size / 2}
         width={size}
         height={size}
         rx={size * 0.15}
-        fill={free ? "#f97316" : "#9ca3af"}
+        fill={chosen ? "#16a34a" : free ? "#f97316" : "#9ca3af"}
         stroke="white"
         strokeWidth={stroke * 0.6}
       />
@@ -51,7 +63,7 @@ function Connector({ x, z, size, free, label, side, font, stroke }) {
           y={z}
           fontSize={font}
           fontWeight={700}
-          fill={free ? "#c2410c" : "#6b7280"}
+          fill={chosen ? "#15803d" : free ? "#c2410c" : "#6b7280"}
           textAnchor={side === "left" ? "end" : "start"}
           dominantBaseline="middle"
           className="plan-label"
@@ -177,6 +189,9 @@ export default function Plan2D({
   dasPorts = {},
   // hover text of DAS parts and antennas: ports, connections, connector
   portInfo = {},
+  // Cable tool: the item whose end is being chosen, and the chosen start end
+  cablePick = null,
+  cableStartPort = null,
 }) {
   const unit = useMeasurementUnit();
   const shown = (id) => !hiddenLayers.includes(id);
@@ -1018,8 +1033,13 @@ export default function Plan2D({
         {(shown("sources") ? sources : []).map((s) => {
           const ports = tool === "dascable" ? dasPorts[s.id] : null;
           // the item under the pointer and the cable's start pop out while drawing a cable
-          const big = Boolean(ports) && (hoverId === s.id || cableFrom === s.id);
-          const k = big ? 1.45 : 1;
+          const picking = Boolean(ports) && cablePick === s.id;
+          const big = Boolean(ports) && (picking || hoverId === s.id || cableFrom === s.id);
+          // the item whose end is being chosen is the largest, so its ends are easy to click
+          const k = picking ? 1.9 : big ? 1.5 : 1;
+          const endSize = apR * (picking ? 1.0 : big ? 0.75 : 0.5);
+          const pick = (port, dir) => () => onPlace("dasport", { id: s.id, port, dir });
+          const isStart = (port) => cableStartPort?.id === s.id && cableStartPort.port === port;
           return (
           <g
             key={s.id}
@@ -1067,32 +1087,36 @@ export default function Plan2D({
               </text>
             )}
             {ports && (
-              // connectors: the input on the left, the outputs on the right;
-              // orange = free to connect, grey = used (named when the item pops out)
-              <g pointerEvents="none">
+              // ends: the input on the left, the outputs on the right; orange = free,
+              // grey = used, green = the chosen start. Click an end to connect it.
+              <g>
                 {ports.input && (
                   <Connector
-                    x={+s.x - apR * k * 1.55}
+                    x={+s.x - apR * k - endSize * 0.9}
                     z={+s.z}
-                    size={apR * (big ? 0.62 : 0.42)}
+                    size={endSize}
                     free={!ports.input.used}
+                    chosen={isStart(ports.input.id)}
                     label={big ? ports.input.label : null}
                     side="left"
-                    font={apFont * 0.75}
+                    font={apFont * (picking ? 1 : 0.8)}
                     stroke={apStroke}
+                    onPick={pick(ports.input.id, "in")}
                   />
                 )}
                 {(ports.ports || []).map((port, i) => (
                   <Connector
                     key={port.id}
-                    x={+s.x + apR * k * 1.55}
-                    z={+s.z + (i - (ports.ports.length - 1) / 2) * apR * (big ? 1.05 : 0.8)}
-                    size={apR * (big ? 0.62 : 0.42)}
+                    x={+s.x + apR * k + endSize * 0.9}
+                    z={+s.z + (i - (ports.ports.length - 1) / 2) * endSize * 1.5}
+                    size={endSize}
                     free={!port.cableId}
+                    chosen={isStart(port.id)}
                     label={big ? port.label : null}
                     side="right"
-                    font={apFont * 0.75}
+                    font={apFont * (picking ? 1 : 0.8)}
                     stroke={apStroke}
+                    onPick={pick(port.id, "out")}
                   />
                 ))}
               </g>

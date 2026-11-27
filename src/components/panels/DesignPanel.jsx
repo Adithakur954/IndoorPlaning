@@ -119,8 +119,9 @@ export default function DesignPanel({
   cancelCable,
   undoCableBend,
   portInfo = {},
-  portPick = null,
-  choosePort,
+  cablePick = null,
+  cableStartPort = null,
+  chooseCableEnd,
 }) {
   const unit = useMeasurementUnit();
   const [panelWidth, setPanelWidthState] = useState(() => {
@@ -215,8 +216,9 @@ export default function DesignPanel({
               cablePoints={cablePoints}
               cancelCable={cancelCable}
               undoCableBend={undoCableBend}
-              portPick={portPick}
-              choosePort={choosePort}
+              cablePick={cablePick}
+              cableStartPort={cableStartPort}
+              chooseCableEnd={chooseCableEnd}
             />
           )}
           {workspace === "cellular" && cellular?.hasResult && cellular.show ? (
@@ -297,6 +299,8 @@ export default function DesignPanel({
                 antennaPowers,
                 dasPorts,
                 portInfo,
+                cablePick,
+                cableStartPort,
               }}
             />
           )}
@@ -720,7 +724,12 @@ export default function DesignPanel({
                   <RoomMaterials room={obj} plan={plan} mutate={mutate} />
                 )}
                 {selected.type === "source" && obj.kind === "das" && (
-                  <DasPartInspector plan={plan} part={obj} mutate={mutate} cellular={cellular} />
+                  <>
+                    <DasPartInspector plan={plan} part={obj} mutate={mutate} cellular={cellular} />
+                    <button type="button" className="danger-text" onClick={deleteObj}>
+                      Delete {obj.name} and its cables (Delete key)
+                    </button>
+                  </>
                 )}
                 {selected.type === "dascable" && (
                   <DasCableInspector plan={plan} cable={obj} mutate={mutate} cellular={cellular} onDelete={deleteObj} />
