@@ -25,7 +25,9 @@ const shortApName = (name) =>
 
 
 
-const DAS_PLACING_TOOLS = ["dassource", "splitter", "coupler", "combiner", "riser"];
+// tools that place one item per click: a click on an existing antenna, AP or DAS part
+// selects it instead of putting a new item (or a circle room) on top of it
+const DAS_PLACING_TOOLS = ["dassource", "splitter", "coupler", "combiner", "riser", "cellular", "wifi", "circle"];
 
 
 // One connector of a DAS part or antenna while drawing a cable: a small square,
@@ -293,8 +295,8 @@ export default function Plan2D({
       onPlace("dascable", { id });
       return;
     }
-    // with a DAS placing tool, a click on an existing part or antenna selects it
-    // (its properties open) instead of placing a new part on top of it
+    // with a placing tool, a click on an existing antenna or part selects it
+    // (its properties open) instead of placing something on top of it
     if (DAS_PLACING_TOOLS.includes(tool) && type === "source") {
       onSelect(entity(type, id));
       return;
