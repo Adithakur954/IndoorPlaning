@@ -113,10 +113,12 @@ export function cableProblem(plan, fromId, toId) {
 // The cable record for a new connection; a coupler's first output is "through", its second "tap".
 // cableId: the type chosen in the tool bar; "auto" (or none) = 7/8" in the shaft, else 1/2".
 // points: the bends clicked while drawing.
-export function newCable(plan, fromId, toId, id, { cableId = "auto", points = [] } = {}) {
+// port: the output of the start part (chosen in the port picker), else its first free one.
+export function newCable(plan, fromId, toId, id, { cableId = "auto", points = [], port } = {}) {
   const from = plan.sources.find((s) => s.id === fromId);
   const to = plan.sources.find((s) => s.id === toId);
-  const used = cellularOf(plan).cables.filter((c) => c.from === fromId).map((c) => c.port);
+  const free = from ? outputPorts(plan, from).filter((p) => !p.cableId) : [];
+  const outPort = free.some((p) => p.id === port) ? port : free[0]?.id;
   // a cable in the shaft (to or from a riser, or between floors) is the riser feeder
   const riser = from?.dasType === "riser" || to?.dasType === "riser" || (from && to && from.floorId !== to.floorId);
   const chosen = DEFAULT_CATALOGUE.cables[cableId] ? cableId : riser ? RISER_CABLE_ID : DEFAULT_CABLE_ID;
@@ -128,7 +130,7 @@ export function newCable(plan, fromId, toId, id, { cableId = "auto", points = []
     ...(points.length ? { points } : {}),
     extraM: 0,
     connectors: 2,
-    ...(from?.dasType === "coupler" ? { port: used.includes("through") ? "tap" : "through" } : {}),
+    ...(outPort ? { port: outPort } : {}),
   };
 }
 
@@ -169,7 +171,8 @@ export function dasPowers(plan, carrier) {
         cableId: c.cableId || DEFAULT_CABLE_ID,
         lengthM: cableLengthM(plan, c),
         connectors: Number.isFinite(Number(c.connectors)) ? Number(c.connectors) : 2,
-        ...(c.port ? { port: c.port } : {}),
+        // the engine needs the port of a coupler output (through / tap); other ports are labels
+        ...(items.get(c.from)?.dasType === "coupler" ? { port: c.port || "through" } : {}),
       }));
     const power = Number(source.powerDbm?.[carrier.id] ?? source.defaultPowerDbm ?? DEFAULT_SOURCE_POWER_DBM);
     try {
@@ -206,16 +209,8 @@ export function cableLossAt(plan, cable, freqMHz) {
 // How many outputs a part has and how many are used (splitter ways, coupler
 // through + tap, one for a riser / combiner / source).
 export function partOutputs(plan, part) {
-  const used = cellularOf(plan).cables.filter((c) => c.from === part.id).length;
-  const total =
-    part.dasType === "splitter"
-      ? DEFAULT_CATALOGUE.splitters[part.partId]?.ways ?? 2
-      : part.dasType === "coupler"
-        ? 2
-        : part.dasType === "source"
-          ? Math.max(1, used + 1) // a source can feed several trunks
-          : 1;
-  return { total, used };
+  const ports = outputPorts(plan, part);
+  return { total: ports.length, used: ports.filter((p) => p.cableId).length, ports };
 }
 
 // The plan without DAS cables whose start or end no longer exists (a deleted
@@ -241,4 +236,95 @@ export function moveCableBends(plan, moved, fn) {
       ),
     },
   };
+}
+
+// ---------- ports ----------
+// Connector of each part (datasheets: splitters, couplers, antennas N female;
+// combiners 4.3-10 female).
+export const connectorOf = (item) => (item?.dasType === "combiner" ? "4.3-10 female" : "N female");
+
+const portLabel = (id) =>
+  ({ in: "In", through: "Through", tap: "Tap", out: "Out", ant: "Ant" })[id] || id.replace(/^out(\d+)$/, "Out $1");
+
+// The output ports of a part, each with the cable that uses it (if any).
+// Cables saved before ports existed take the free ports in drawing order.
+export function outputPorts(plan, part) {
+  if (!part || part.kind !== "das") return [];
+  const cables = cellularOf(plan).cables.filter((c) => c.from === part.id);
+  const ids =
+    part.dasType === "splitter"
+      ? Array.from({ length: DEFAULT_CATALOGUE.splitters[part.partId]?.ways ?? 2 }, (_, i) => `out${i + 1}`)
+      : part.dasType === "coupler"
+        ? ["through", "tap"]
+        : part.dasType === "source"
+          ? Array.from({ length: Math.max(1, cables.length + 1) }, (_, i) => `out${i + 1}`) // a source feeds as many trunks as needed
+          : ["out"];
+  const ports = ids.map((id) => ({ id, label: portLabel(id), cableId: null }));
+  const unplaced = [];
+  for (const c of cables) {
+    const p = ports.find((x) => x.id === c.port && !x.cableId);
+    if (p) p.cableId = c.id;
+    else unplaced.push(c);
+  }
+  for (const c of unplaced) {
+    const p = ports.find((x) => !x.cableId);
+    if (p) p.cableId = c.id;
+  }
+  return ports;
+}
+
+// Every port of a part or antenna with what it connects to, for the tooltip:
+// [{ id, label, dir: "in" | "out", other: name | null, otherPort }]
+export function portsOf(plan, item) {
+  const cables = cellularOf(plan).cables;
+  const name = (id) => plan.sources.find((s) => s.id === id)?.name || "?";
+  const input = cables.find((c) => c.to === item.id);
+  const inPort = item.kind === "cellular" ? "ant" : "in";
+  const list = [];
+  if (item.dasType !== "source")
+    list.push({ id: inPort, label: portLabel(inPort), dir: "in", other: input ? name(input.from) : null, otherPort: input ? cablePortLabel(plan, input) : null });
+  for (const p of outputPorts(plan, item)) {
+    const c = p.cableId ? cables.find((x) => x.id === p.cableId) : null;
+    const end = c ? plan.sources.find((s) => s.id === c.to) : null;
+    list.push({ id: p.id, label: p.label, dir: "out", other: c ? name(c.to) : null, otherPort: c ? (end?.kind === "cellular" ? "Ant" : "In") : null });
+  }
+  return list;
+}
+
+// The output port a cable leaves from, as a label ("Out 2", "Tap").
+export function cablePortLabel(plan, cable) {
+  const from = plan.sources.find((s) => s.id === cable.from);
+  const p = outputPorts(plan, from).find((x) => x.cableId === cable.id);
+  return p ? p.label : "";
+}
+
+// ---------- drawing a cable in either order ----------
+// True when the part is a source or gets its signal from one through cables.
+function fedFromSource(plan, id) {
+  const cables = cellularOf(plan).cables;
+  const seen = new Set();
+  for (let at = id; at && !seen.has(at); ) {
+    seen.add(at);
+    const item = plan.sources.find((s) => s.id === at);
+    if (item?.dasType === "source") return true;
+    at = cables.find((c) => c.to === at)?.from;
+  }
+  return false;
+}
+
+// The direction of a cable between the two clicked items: the signal flows
+// from the source side toward the antennas. Returns { from, to } or { problem }.
+export function orientCable(plan, firstId, secondId) {
+  const a = plan.sources.find((s) => s.id === firstId);
+  const b = plan.sources.find((s) => s.id === secondId);
+  if (!a || !b) return { problem: "A cable joins two DAS parts or antennas." };
+  if (a.kind === "cellular" && b.kind === "cellular") return { problem: "A cable cannot join two antennas: put a splitter or coupler between them." };
+  if (b.kind === "cellular") return { from: a.id, to: b.id };
+  if (a.kind === "cellular") return { from: b.id, to: a.id };
+  if (a.dasType === "source") return { from: a.id, to: b.id };
+  if (b.dasType === "source") return { from: b.id, to: a.id };
+  const fa = fedFromSource(plan, a.id);
+  const fb = fedFromSource(plan, b.id);
+  if (fb && !fa) return { from: b.id, to: a.id };
+  return { from: a.id, to: b.id };
 }

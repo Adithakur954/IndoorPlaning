@@ -118,6 +118,9 @@ export default function DesignPanel({
   setDasOptions,
   cancelCable,
   undoCableBend,
+  portInfo = {},
+  portPick = null,
+  choosePort,
 }) {
   const unit = useMeasurementUnit();
   const [panelWidth, setPanelWidthState] = useState(() => {
@@ -212,6 +215,8 @@ export default function DesignPanel({
               cablePoints={cablePoints}
               cancelCable={cancelCable}
               undoCableBend={undoCableBend}
+              portPick={portPick}
+              choosePort={choosePort}
             />
           )}
           {workspace === "cellular" && cellular?.hasResult && cellular.show ? (
@@ -291,6 +296,7 @@ export default function DesignPanel({
                 cableDraft,
                 antennaPowers,
                 dasPorts,
+                portInfo,
               }}
             />
           )}

@@ -84,7 +84,11 @@ import {
   dasPowers,
   newCable,
   newDasPart,
+  connectorOf,
+  orientCable,
+  outputPorts,
   partOutputs,
+  portsOf,
   withoutLooseCables,
 } from "../infra/cellular/das.js";
 import { WORKSPACES, useWorkspace, workspaceOf } from "../workspace.js";
@@ -185,6 +189,8 @@ export default function PlannerPage() {
   // DAS Cable tool: the part or antenna the next cable starts from, and the bends clicked since
   const [cableFrom, setCableFrom] = useState(null);
   const [cablePoints, setCablePoints] = useState([]);
+  // a cable waiting for the output of its start part to be chosen (a coupler: through or tap)
+  const [portPick, setPortPick] = useState(null);
   // types chosen in the DAS tool bar for the next part or cable placed
   const [dasOptions, setDasOptions] = useState({ splitter: "s2", coupler: "c10", combiner: "cm21", cable: "auto" });
   const [projectName, setProjectName] = useState(""),
@@ -894,6 +900,20 @@ export default function PlannerPage() {
     setSelected(null);
     setPanelMode("selection");
   };
+  // adds the cable being drawn (port: the chosen output of its start part)
+  const addCable = (from, to, points, port) => {
+    const name = (id) => plan.sources.find((s) => s.id === id)?.name || "part";
+    const c = newCable(plan, from, to, uid(), { cableId: dasOptions.cable, points, port });
+    mutate((old) => {
+      const cur = cellularOf(old);
+      return { ...old, cellular: { ...(old.cellular || {}), ...cur, cables: [...cur.cables, c] } };
+    });
+    const portName = c.port ? ` (${{ through: "Through", tap: "Tap" }[c.port] || c.port.replace(/^out(\d+)$/, "Out $1")})` : "";
+    setMessage(`Cable ${name(from)}${portName} → ${name(to)} added. Click the next end, or Cursor to stop.`);
+    setCableFrom(null);
+    setCablePoints([]);
+    setPortPick(null);
+  };
   const place = (kind, p) => {
     if (kind === "select") return;
     if (kind === "rectangle" || kind === "circle" || kind === "polygon") {
@@ -967,30 +987,31 @@ export default function PlannerPage() {
         else setMessage("Click the source, splitter, coupler, combiner or riser the cable starts from.");
         return;
       }
+      if (portPick) return; // choose the output in the bar first (or Cancel)
       if (!cableFrom) {
-        const start = plan.sources.find((s) => s.id === p.id);
-        if (start?.kind === "cellular") {
-          setMessage(`${start.name} is an antenna: start the cable at a source, splitter, coupler or riser.`);
-          return;
-        }
+        // either end first: a part or an antenna
         setCableFrom(p.id);
         setCablePoints([]);
-        setMessage(`Cable from ${name(p.id)}: click corners along the route, then the part or antenna it goes to (other floors too).`);
+        setMessage(`Cable at ${name(p.id)}: click corners along the route, then the other end (other floors too).`);
         return;
       }
-      const problem = cableProblem(plan, cableFrom, p.id);
+      // the signal runs from the source side to the antennas, whatever the click order
+      const dir = orientCable(plan, cableFrom, p.id);
+      const problem = dir.problem || cableProblem(plan, dir.from, dir.to);
       if (problem) {
         setMessage(problem);
         return;
       }
-      const c = newCable(plan, cableFrom, p.id, uid(), { cableId: dasOptions.cable, points: cablePoints });
-      mutate((old) => {
-        const cur = cellularOf(old);
-        return { ...old, cellular: { ...(old.cellular || {}), ...cur, cables: [...cur.cables, c] } };
-      });
-      setMessage(`Cable ${name(cableFrom)} → ${name(p.id)} added. Click the next start, or Cursor to stop.`);
-      setCableFrom(null);
-      setCablePoints([]);
+      const points = dir.from === cableFrom ? cablePoints : [...cablePoints].reverse();
+      const start = plan.sources.find((s) => s.id === dir.from);
+      const free = outputPorts(plan, start).filter((o) => !o.cableId);
+      // a coupler's two outputs differ (through / tap): ask which one
+      if (start?.dasType === "coupler" && free.length > 1) {
+        setPortPick({ from: dir.from, to: dir.to, points, options: free });
+        setMessage(`Which output of ${start.name} feeds ${name(dir.to)}? Choose it in the bar.`);
+        return;
+      }
+      addCable(dir.from, dir.to, points);
       return;
     }
     if (kind === "cellular" || kind === "wifi") {
@@ -1943,6 +1964,7 @@ Cancel: ${what} of the optimised design instead.`,
     if (tool !== "dascable") {
       setCableFrom(null);
       setCablePoints([]);
+      setPortPick(null);
     }
   }, [tool]);
   // DAS cables with an end on this floor (dashed when the other end is on another floor)
@@ -1997,6 +2019,41 @@ Cancel: ${what} of the optimised design instead.`,
       ),
     [plan, floorId],
   );
+  // hover text of each DAS part and antenna: its ports, what they join and the connector
+  const portInfo = useMemo(() => {
+    if (workspace !== "cellular") return {};
+    return Object.fromEntries(
+      plan.sources
+        .filter((s) => (s.kind === "das" || s.kind === "cellular") && s.floorId === floorId)
+        .map((s) => [
+          s.id,
+          [
+            // the name, and the type in words (the plan label is the short name only)
+            [
+              s.name,
+              s.dasType === "splitter"
+                ? `${outputPorts(plan, s).length}-way splitter`
+                : s.dasType === "coupler"
+                  ? `${String(s.partId || "c10").replace(/^c/, "")} dB coupler`
+                  : s.dasType === "combiner"
+                    ? `combiner ${{ cm21: "2x1", cm22: "2x2", cm44: "4x4" }[s.partId] || ""}`
+                    : s.kind === "das"
+                      ? DAS_TYPES[s.dasType]?.label
+                      : "antenna",
+            ]
+              .filter(Boolean)
+              .join(" · "),
+            ...portsOf(plan, s).map((port) =>
+              `${port.label}: ${port.other ? `${port.dir === "in" ? "from" : "to"} ${port.other}${port.otherPort ? ` (${port.otherPort})` : ""}` : "free"}`,
+            ),
+            `Connector: ${connectorOf(s)}`,
+            Number.isFinite(antennaPowers[s.id]) ? `Port power: ${antennaPowers[s.id].toFixed(1)} dBm` : null,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        ]),
+    );
+  }, [plan, floorId, workspace, antennaPowers]);
   const measurementUnit = plan.property?.unit || "m";
   const panelProps = {
     dasCables,
@@ -2005,12 +2062,16 @@ Cancel: ${what} of the optimised design instead.`,
     cablePoints,
     antennaPowers,
     dasPorts,
+    portInfo,
     dasOptions,
     setDasOptions,
     cancelCable: () => {
       setCableFrom(null);
       setCablePoints([]);
+      setPortPick(null);
     },
+    portPick,
+    choosePort: (port) => portPick && addCable(portPick.from, portPick.to, portPick.points, port),
     undoCableBend: () => setCablePoints((pts) => pts.slice(0, -1)),
     tool,
     setTool,

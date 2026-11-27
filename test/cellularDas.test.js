@@ -2,7 +2,20 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { initialPlan } from "../src/models/plan.js";
 import { buildSceneFiles } from "../src/utils/sceneExport.js";
-import { cableLengthM, cableLossAt, cableProblem, dasPowers, newCable, newDasPart, partOutputs, withoutLooseCables } from "../src/infra/cellular/das.js";
+import {
+  cableLengthM,
+  cableLossAt,
+  cablePortLabel,
+  cableProblem,
+  dasPowers,
+  newCable,
+  newDasPart,
+  orientCable,
+  outputPorts,
+  partOutputs,
+  portsOf,
+  withoutLooseCables,
+} from "../src/infra/cellular/das.js";
 import { rotateParts } from "../src/utils/rotate.js";
 import { shiftRoomContents } from "../src/utils/geometry.js";
 import { buildCellularRequest } from "../src/infra/cellular/request.js";
@@ -102,7 +115,8 @@ test("parts get the type chosen when placed; cables the chosen type, bends and j
   const bent = newCable(plan, "src", "a3", "b", { points: [{ floorId: "f0", x: 0, z: 15 }] });
   near(cableLengthM(plan, bent), 5 + 25);
   near(cableLengthM(plan, { ...bent, cableId: "jumper" }), 1);
-  assert.deepEqual(partOutputs(plan, plan.sources.find((s) => s.id === "sp")), { total: 2, used: 2 });
+  const out = partOutputs(plan, plan.sources.find((s) => s.id === "sp"));
+  assert.deepEqual([out.total, out.used], [2, 2]);
 });
 
 test("rotating or moving the building moves cable bends; removed parts take their cables", () => {
@@ -119,6 +133,25 @@ test("rotating or moving the building moves cable bends; removed parts take thei
   // a deleted part leaves no cable behind
   const gone = withoutLooseCables({ ...plan, sources: plan.sources.filter((s) => s.id !== "sp") });
   assert.deepEqual(gone.cellular.cables.map((c) => c.id), []);
+});
+
+test("ports: splitter outputs are named and filled in order, a cable can be drawn in either order", () => {
+  const plan = dasPlan();
+  const sp = plan.sources.find((s) => s.id === "sp");
+  assert.deepEqual(outputPorts(plan, sp).map((p) => [p.id, Boolean(p.cableId)]), [["out1", true], ["out2", true]]);
+  assert.equal(cablePortLabel(plan, plan.cellular.cables.find((c) => c.id === "c3")), "Out 2");
+  assert.deepEqual(portsOf(plan, plan.sources.find((s) => s.id === "a1"))[0], { id: "ant", label: "Ant", dir: "in", other: "SP1", otherPort: "Out 1" });
+  // antenna clicked first: the cable still runs from the part to the antenna
+  assert.deepEqual(orientCable(plan, "a3", "sp"), { from: "sp", to: "a3" });
+  assert.match(orientCable(plan, "a1", "a3").problem, /two antennas/);
+  // between two parts, the one fed from the source is the start
+  const withCoupler = { ...plan, sources: [...plan.sources, newDasPart(plan, "coupler", "f0", { x: 20, z: 10 }, "cp")] };
+  assert.deepEqual(orientCable(withCoupler, "cp", "sp"), { from: "sp", to: "cp" });
+  // a coupler output is chosen; the other one stays free
+  const c = newCable(withCoupler, "cp", "a3", "z", { port: "tap" });
+  assert.equal(c.port, "tap");
+  const both = { ...withCoupler, cellular: { ...withCoupler.cellular, cables: [...withCoupler.cellular.cables, c] } };
+  assert.deepEqual(outputPorts(both, both.sources.find((s) => s.id === "cp")).filter((p) => !p.cableId).map((p) => p.id), ["through"]);
 });
 
 test("a cable that would break the tree is refused", () => {

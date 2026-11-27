@@ -27,16 +27,6 @@ const shortApName = (name) =>
 
 const DAS_PLACING_TOOLS = ["dassource", "splitter", "coupler", "combiner", "riser"];
 
-// the type shown after a DAS part's name: "2-way", "10 dB", "2x1"
-const dasTypeLabel = (s) =>
-  s.dasType === "splitter"
-    ? `${{ s2: 2, s3: 3, s4: 4 }[s.partId] || 2}-way`
-    : s.dasType === "coupler"
-      ? `${String(s.partId || "c10").replace(/^c/, "")} dB`
-      : s.dasType === "combiner"
-        ? { cm21: "2x1", cm22: "2x2", cm44: "4x4" }[s.partId] || ""
-        : "";
-
 // Plan symbols. Wi-Fi AP: a filled dot. Cellular antenna: a circle with an X
 // (a wall panel also shows where it points). DAS parts: a source box, a
 // splitter (one in, several out), a coupler (through and tap) and a riser.
@@ -149,6 +139,8 @@ export default function Plan2D({
   // port power per antenna at the chosen band, and used / free outputs per DAS part
   antennaPowers = {},
   dasPorts = {},
+  // hover text of DAS parts and antennas: ports, connections, connector
+  portInfo = {},
 }) {
   const unit = useMeasurementUnit();
   const shown = (id) => !hiddenLayers.includes(id);
@@ -570,8 +562,7 @@ export default function Plan2D({
       if (s.kind !== "wifi" || showWifiNames)
         items.push({
           id: `s:${s.id}`,
-          // the label as drawn: a DAS part also shows its type ("SP1 · 3-way")
-          text: shortApName(s.name) + (s.kind === "das" && dasTypeLabel(s) ? ` · ${dasTypeLabel(s)}` : ""),
+          text: shortApName(s.name),
           fontSize: apFont,
           priority: 2,
           preferred: null,
@@ -995,6 +986,7 @@ export default function Plan2D({
             {cableFrom === s.id && (
               <circle cx={s.x} cy={s.z} r={apR * 1.8} fill="none" stroke="#e8790a" strokeWidth={apStroke * 1.5} strokeDasharray={`${apR / 2} ${apR / 3}`} />
             )}
+            {portInfo[s.id] && <title>{portInfo[s.id]}</title>}
             <SourceSymbol s={s} r={apR} stroke={apStroke} selected={selected?.type === "source" && selected.id === s.id} />
             {(s.kind !== "wifi" || showWifiNames) && (
               <text
@@ -1009,7 +1001,6 @@ export default function Plan2D({
                 pointerEvents="none"
               >
                 {shortApName(s.name)}
-                {s.kind === "das" && dasTypeLabel(s) ? ` · ${dasTypeLabel(s)}` : ""}
               </text>
             )}
             {s.kind === "cellular" && Number.isFinite(antennaPowers[s.id]) && (

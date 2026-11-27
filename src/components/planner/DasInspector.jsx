@@ -6,7 +6,15 @@ import { carrierLabel } from "../../infra/cellular/bands.js";
 import { DEFAULT_CATALOGUE } from "../../infra/cellular/engine/catalogue.js";
 import { couplerTapLossDb, couplerThroughLossDb, splitterLossDb } from "../../infra/cellular/engine/passive.js";
 import { cellularOf } from "../../infra/cellular/model.js";
-import { DAS_TYPES, DEFAULT_SOURCE_POWER_DBM, cableLengthM, cableLossAt, dasPowers } from "../../infra/cellular/das.js";
+import {
+  DAS_TYPES,
+  DEFAULT_SOURCE_POWER_DBM,
+  cableLengthM,
+  cableLossAt,
+  connectorOf,
+  dasPowers,
+  outputPorts,
+} from "../../infra/cellular/das.js";
 
 const fmt = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : "–");
 // where the loss values come from (engine/catalogue.js)
@@ -131,11 +139,12 @@ export function DasCableInspector({ plan, cable, mutate, cellular, onDelete }) {
     }));
   const lengthM = cableLengthM(plan, cable);
   const loss = carrier ? cableLossAt(plan, cable, carrier.freqMHz) : null;
+  const ports = from ? outputPorts(plan, from) : [];
   return (
     <div className="inspector-fields">
       <p className="hint">
         <strong>
-          {name(cable.from)} → {name(cable.to)}
+          {name(cable.from)} {ports.find((p) => p.cableId === cable.id)?.label || ""} → {name(cable.to)} {to?.kind === "cellular" ? "Ant" : "In"}
         </strong>
         {from && to && from.floorId !== to.floorId ? ` · ${floorName(from.floorId)} → ${floorName(to.floorId)}` : ""}
       </p>
@@ -148,15 +157,19 @@ export function DasCableInspector({ plan, cable, mutate, cellular, onDelete }) {
       />
       <Field label="Extra length (m)" type="number" value={cable.extraM ?? 0} onChange={(v) => patch({ extraM: Number(v) || 0 })} />
       <Field label="Connectors" type="number" value={cable.connectors ?? 2} onChange={(v) => patch({ connectors: Math.max(0, Math.round(Number(v) || 0)) })} />
-      {from?.dasType === "coupler" && (
+      {ports.length > 1 && (
+        // the output this cable leaves from: its own or a free one
         <Field
-          label="Coupler output"
-          value={cable.port || "through"}
-          options={["through", "tap"]}
-          optionLabels={{ through: "Through", tap: "Tap" }}
+          label={`Output of ${name(cable.from)}`}
+          value={ports.find((p) => p.cableId === cable.id)?.id || ""}
+          options={ports.filter((p) => !p.cableId || p.cableId === cable.id).map((p) => p.id)}
+          optionLabels={Object.fromEntries(ports.map((p) => [p.id, p.label]))}
           onChange={(v) => patch({ port: v })}
         />
       )}
+      <p className="hint">
+        Connectors: {connectorOf(from)} → {connectorOf(to)}.
+      </p>
       <p className="hint">
         Length {fmt(lengthM)} m (along the plan{from && to && from.floorId !== to.floorId ? " plus the floor height" : ""}
         {Number(cable.extraM) ? ` plus ${fmt(Number(cable.extraM))} m extra` : ""}).
@@ -212,8 +225,34 @@ export function AntennaFeed({ plan, antenna, carrier }) {
 // state of the cable being drawn.
 export const DAS_TOOL_IDS = ["dassource", "splitter", "coupler", "combiner", "riser", "dascable"];
 
-export function DasToolBar({ tool, plan, dasOptions, setDasOptions, cableFrom, cablePoints = [], cancelCable, undoCableBend }) {
+export function DasToolBar({ tool, plan, dasOptions, setDasOptions, cableFrom, cablePoints = [], cancelCable, undoCableBend, portPick, choosePort }) {
   if (!DAS_TOOL_IDS.includes(tool)) return null;
+  const nameOf = (id) => plan.sources.find((s) => s.id === id)?.name || "?";
+  if (tool === "dascable" && portPick)
+    return (
+      <div className="das-toolbar" role="toolbar" aria-label="Choose the output">
+        <strong>
+          {nameOf(portPick.from)} → {nameOf(portPick.to)}
+        </strong>
+        <small>Which output?</small>
+        <div className="segmented" role="group">
+          {portPick.options.map((o) => {
+            const part = plan.sources.find((s) => s.id === portPick.from);
+            const cp = DEFAULT_CATALOGUE.couplers[part?.partId];
+            const loss = cp ? (o.id === "tap" ? couplerTapLossDb(cp) : o.id === "through" ? couplerThroughLossDb(cp) : null) : null;
+            return (
+              <button key={o.id} type="button" onClick={() => choosePort(o.id)}>
+                {o.label}
+                {Number.isFinite(loss) ? ` (−${fmt(loss)} dB)` : ""}
+              </button>
+            );
+          })}
+        </div>
+        <button type="button" onClick={cancelCable}>
+          Cancel
+        </button>
+      </div>
+    );
   const set = (key, value) => setDasOptions((o) => ({ ...o, [key]: value }));
   const choice = (key, items) => (
     <div className="segmented" role="group">
@@ -270,8 +309,8 @@ export function DasToolBar({ tool, plan, dasOptions, setDasOptions, cableFrom, c
           ])}
           <small>
             {start
-              ? `From ${start.name}: click corners along the route${cablePoints.length ? ` (${cablePoints.length} so far)` : ""}, then the part or antenna it feeds.`
-              : "Click the part the cable starts from."}
+              ? `At ${start.name}: click corners along the route${cablePoints.length ? ` (${cablePoints.length} so far)` : ""}, then the other end.`
+              : "Click one end: a part or an antenna (either order)."}
           </small>
           {start && cablePoints.length > 0 && (
             <button type="button" onClick={undoCableBend}>
