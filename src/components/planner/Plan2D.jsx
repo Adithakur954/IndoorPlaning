@@ -149,6 +149,7 @@ export default function Plan2D({
     panDrag = useRef(null),
     [wallStart, setWallStart] = useState(null),
     [poly, setPoly] = useState([]),
+    [polyCursor, setPolyCursor] = useState(null),
     // rectangle being drawn: press at one corner, drag to the opposite corner
     [rectDraft, setRectDraft] = useState(null),
     [pan, setPan] = useState({ x: 0, z: 0 });
@@ -164,7 +165,10 @@ export default function Plan2D({
     onZoom?.(1);
   }, [floorId]);
   useEffect(() => {
-    if (tool !== "polygon" && tool !== "boundary") setPoly([]);
+    if (tool !== "polygon" && tool !== "boundary") {
+      setPoly([]);
+      setPolyCursor(null);
+    }
     if (tool !== "wall") setWallStart(null);
     if (tool !== "rectangle") setRectDraft(null);
   }, [tool]);
@@ -317,8 +321,18 @@ export default function Plan2D({
       setRectDraft((d) => (d ? { ...d, end: p } : d));
       return;
     }
+    if ((tool === "polygon" || tool === "boundary") && poly.length) {
+      const p = point(e);
+      setPolyCursor((current) =>
+        current?.x === p.x && current?.z === p.z ? current : p,
+      );
+    }
     if (!drag.current) {
-      svg.current.style.cursor = e.ctrlKey ? "grab" : "auto";
+      svg.current.style.cursor = e.ctrlKey
+        ? "grab"
+        : tool === "polygon" || tool === "boundary"
+          ? "crosshair"
+          : "auto";
       return;
     }
     const d = drag.current;
@@ -390,6 +404,7 @@ export default function Plan2D({
     }
     if (tool === "polygon" || tool === "boundary") {
       setPoly([...poly, p]);
+      setPolyCursor(p);
       return;
     }
     if (tool === "rectangle") {
@@ -400,10 +415,32 @@ export default function Plan2D({
     if (tool === "select") onSelect(null);
     else onPlace(tool, p);
   };
-  const finishPolygon = () => {
-    if (poly.length >= 3)
-      onPlace(tool === "boundary" ? "boundary" : "polygon", { points: poly });
+  const finishPolygon = (endPoint = null) => {
+    const last = poly[poly.length - 1];
+    const candidate = endPoint && (!last || Math.hypot(endPoint.x - last.x, endPoint.z - last.z) > 0.01)
+      ? [...poly, endPoint]
+      : poly;
+    const points = candidate.filter((q, i) =>
+      i === 0 || Math.hypot(q.x - candidate[i - 1].x, q.z - candidate[i - 1].z) > 0.01,
+    );
+    if (
+      points.length > 2 &&
+      Math.hypot(points[0].x - points[points.length - 1].x, points[0].z - points[points.length - 1].z) <= 0.01
+    ) points.pop();
+    if (tool === "boundary" && points.length >= 3) {
+      onPlace("boundary", { points });
+    } else if (tool === "polygon" && points.length === 2) {
+      onPlace("wall", {
+        x1: points[0].x,
+        z1: points[0].z,
+        x2: points[1].x,
+        z2: points[1].z,
+      });
+    } else if (tool === "polygon" && points.length >= 3) {
+      onPlace("polygon", { points });
+    }
     setPoly([]);
+    setPolyCursor(null);
   };
   // memoised: a new array here would rebuild the whole heatmap image on every
   // pan/zoom frame
@@ -651,9 +688,15 @@ export default function Plan2D({
             </span>
           )}
           {poly.length > 0 && (
-            <button onClick={finishPolygon} disabled={poly.length < 3}>
-              Finish {tool === "boundary" ? "boundary" : "polygon"} ({poly.length})
+            <button
+              onClick={() => finishPolygon()}
+              disabled={tool === "boundary" ? poly.length < 3 : poly.length < 2}
+            >
+              Finish {tool === "boundary" ? "boundary" : poly.length === 2 ? "wall" : "room"} ({poly.length})
             </button>
+          )}
+          {poly.length > 0 && (
+            <span>Click to add points · double-click to finish</span>
           )}
           {wallStart && <span>Click wall end point</span>}
         </div>
@@ -674,6 +717,15 @@ export default function Plan2D({
         onPointerMove={move}
         onPointerUp={up}
         onPointerCancel={up}
+        onDoubleClick={(e) => {
+          if (
+            (tool === "polygon" || tool === "boundary") &&
+            (e.target === svg.current || e.target.dataset.background)
+          ) {
+            e.preventDefault();
+            finishPolygon(point(e));
+          }
+        }}
         onPointerDown={(e) => {
           if (e.target === svg || e.target.dataset.background) background(e);
         }}
@@ -1183,12 +1235,28 @@ export default function Plan2D({
         )}
         {poly.length > 0 && (
           <polyline
-            points={poly.map((p) => `${p.x},${p.z}`).join(" ")}
+            points={[...poly, ...(polyCursor ? [polyCursor] : [])]
+              .map((p) => `${p.x},${p.z}`)
+              .join(" ")}
             fill="none"
             stroke="#e8790a"
             strokeWidth=".1"
+            strokeDasharray={polyCursor ? ".3 .15" : undefined}
+            pointerEvents="none"
           />
         )}
+        {poly.map((p, i) => (
+          <circle
+            key={`poly-point-${i}`}
+            cx={p.x}
+            cy={p.z}
+            r={Math.max(0.12, 5 * mPerPx)}
+            fill="#fff"
+            stroke="#e8790a"
+            strokeWidth={Math.max(0.06, 2 * mPerPx)}
+            pointerEvents="none"
+          />
+        ))}
         {wallStart && (
           <circle cx={wallStart.x} cy={wallStart.z} r=".2" fill="#e8790a" />
         )}

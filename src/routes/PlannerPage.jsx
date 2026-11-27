@@ -2448,22 +2448,6 @@ Cancel: ${what} of the optimised design instead.`,
                   }
                 />
               )}
-              <label
-                className="prediction-opacity"
-                title="Opacity of the prediction image"
-              >
-                <span>Opacity {Math.round(heatmapOpacity * 100)}%</span>
-                <input
-                  type="range"
-                  min="10"
-                  max="100"
-                  step="5"
-                  value={Math.round(heatmapOpacity * 100)}
-                  onChange={(e) =>
-                    setHeatmapOpacity(Number(e.target.value) / 100)
-                  }
-                />
-              </label>
               <ShowMenu
                 workspace={workspace}
                 hiddenLayers={hiddenLayers}
@@ -2526,13 +2510,32 @@ Cancel: ${what} of the optimised design instead.`,
                   },
                 ].filter(Boolean)}
               />
-              <LegendMenu
-                sections={legendSections}
-                onChange={setLegendSections}
-              />
-              <DownloadImageButton onDownload={downloadPlot} busy={imageBusy} />
-              {/* Wi-Fi reports (per AP, 2.4 vs 5 GHz); the cellular report is its own step */}
-              {workspace === "wifi" && (<>
+              <details className="editor-overflow">
+                <summary aria-label="View settings and exports">View &amp; export</summary>
+                <div className="editor-overflow-popover">
+                  <label
+                    className="prediction-opacity"
+                    title="Opacity of the prediction image"
+                  >
+                    <span>Map opacity {Math.round(heatmapOpacity * 100)}%</span>
+                    <input
+                      type="range"
+                      min="10"
+                      max="100"
+                      step="5"
+                      value={Math.round(heatmapOpacity * 100)}
+                      onChange={(e) =>
+                        setHeatmapOpacity(Number(e.target.value) / 100)
+                      }
+                    />
+                  </label>
+                  <LegendMenu
+                    sections={legendSections}
+                    onChange={setLegendSections}
+                  />
+                  <DownloadImageButton onDownload={downloadPlot} busy={imageBusy} />
+                  {/* Wi-Fi reports (per AP, 2.4 vs 5 GHz); the cellular report is its own step */}
+                  {workspace === "wifi" && (<>
               <button
                 className="download-image-trigger icon-button"
                 type="button"
@@ -2590,6 +2593,8 @@ Cancel: ${what} of the optimised design instead.`,
                 </svg>
               </button>
               </>)}
+                </div>
+              </details>
             </header>
           )}
           <main className={`main ${tab === "design" ? "main-editor" : ""}`}>
