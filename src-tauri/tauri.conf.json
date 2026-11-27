@@ -4,6 +4,8 @@
   "version": "1.0.4",
   "identifier": "com.indoorplanner.desktop",
   "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:5173",
     "beforeBuildCommand": "node scripts/prepare-desktop.mjs",
     "frontendDist": "../dist"
   },

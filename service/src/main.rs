@@ -4,7 +4,10 @@ use std::time::Duration;
 use indoor_sim_service::{api, jobs};
 
 fn env_or<T: std::str::FromStr>(key: &str, default: T) -> T {
-    std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }
 
 #[tokio::main]
@@ -13,7 +16,8 @@ async fn main() {
     // service works from any current directory, e.g. `npm run sim:service`.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
     let app_data = std::env::var("INDOOR_DATA_DIR")
-        .map(PathBuf::from).unwrap_or_else(|_| root.join("data"));
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| root.join("data"));
     let worker_dir = std::env::var("WORKER_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| root.join("worker"));
@@ -26,9 +30,13 @@ async fn main() {
         data_dir: std::env::var("SIM_DATA_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| app_data.join("simulations")),
-        python: std::env::var("WORKER_PYTHON")
-            .map(PathBuf::from)
-            .unwrap_or(if venv_python.exists() { venv_python } else { PathBuf::from("python") }),
+        python: std::env::var("WORKER_PYTHON").map(PathBuf::from).unwrap_or(
+            if venv_python.exists() {
+                venv_python
+            } else {
+                PathBuf::from("python")
+            },
+        ),
         worker_dir,
         job_timeout: Duration::from_secs(env_or("JOB_TIMEOUT_SECS", 1800)),
         concurrency: env_or("SIM_CONCURRENCY", 1),
@@ -45,20 +53,33 @@ async fn main() {
     // project) are removed at start-up; very recent ones may not be saved yet.
     let removed = match indoor_sim_service::maintenance::referenced_job_ids(&cfg.projects_file) {
         Ok(keep) => indoor_sim_service::maintenance::cleanup_orphans(
-            &cfg, &keep, Duration::from_secs(env_or("ORPHAN_MIN_AGE_SECS", 600)),
+            &cfg,
+            &keep,
+            Duration::from_secs(env_or("ORPHAN_MIN_AGE_SECS", 600)),
         ),
-        Err(error) => { eprintln!("skipping result cleanup: {error}"); 0 }
+        Err(error) => {
+            eprintln!("skipping result cleanup: {error}");
+            0
+        }
     };
     if removed > 0 {
         println!("removed {removed} saved result(s) no project refers to");
     }
     let (state, rx) = jobs::new_state(cfg);
     jobs::spawn_runners(state.clone(), rx);
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await.expect("cannot bind port");
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+        .await
+        .expect("cannot bind port");
     if let Ok(file) = std::env::var("DESKTOP_READY_FILE") {
-        std::fs::write(file, serde_json::json!({ "port": listener.local_addr().unwrap().port() }).to_string())
-            .expect("cannot report desktop readiness");
+        std::fs::write(
+            file,
+            serde_json::json!({ "port": listener.local_addr().unwrap().port() }).to_string(),
+        )
+        .expect("cannot report desktop readiness");
     }
-    println!("simulation service on http://127.0.0.1:{port} (python: {})", state.cfg.python.display());
+    println!(
+        "simulation service on http://127.0.0.1:{port} (python: {})",
+        state.cfg.python.display()
+    );
     axum::serve(listener, api::router(state)).await.unwrap();
 }

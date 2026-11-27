@@ -12,6 +12,7 @@ import {
   cableLengthM,
   cableLossAt,
   connectorOf,
+  dasCatalogue,
   dasPowers,
   outputPorts,
   portsOf,
@@ -56,7 +57,7 @@ export function DasPartInspector({ plan, part, mutate, cellular }) {
         ))}
       {part.dasType === "splitter" && (
         <div className="segmented" role="group" aria-label="Splitter outputs">
-          {Object.values(DEFAULT_CATALOGUE.splitters).map((sp) => (
+          {Object.values(dasCatalogue(plan).splitters).map((sp) => (
             <button
               key={sp.id}
               type="button"
@@ -75,9 +76,9 @@ export function DasPartInspector({ plan, part, mutate, cellular }) {
           <Field
             label="Coupling"
             value={part.partId || "c10"}
-            options={Object.keys(DEFAULT_CATALOGUE.couplers)}
+            options={Object.keys(dasCatalogue(plan).couplers)}
             optionLabels={Object.fromEntries(
-              Object.values(DEFAULT_CATALOGUE.couplers).map((cp) => [
+              Object.values(dasCatalogue(plan).couplers).map((cp) => [
                 cp.id,
                 `${cp.couplingDb} dB: tap −${fmt(couplerTapLossDb(cp))} dB, through −${fmt(couplerThroughLossDb(cp))} dB`,
               ]),
@@ -91,9 +92,20 @@ export function DasPartInspector({ plan, part, mutate, cellular }) {
         <Field
           label="Combiner"
           value={part.partId || "cm21"}
-          options={["cm21", "cm22", "cm44"]}
+          options={Object.values(dasCatalogue(plan).inline).filter((x) => x.model || x.imported).map((x) => x.id)}
           optionLabels={Object.fromEntries(
-            ["cm21", "cm22", "cm44"].map((id) => [id, `${DEFAULT_CATALOGUE.inline[id].name}: −${fmt(DEFAULT_CATALOGUE.inline[id].lossDb)} dB`]),
+            Object.values(dasCatalogue(plan).inline).filter((x) => x.model || x.imported).map((x) => [x.id, `${x.model || x.name}: −${fmt(x.lossDb)} dB`]),
+          )}
+          onChange={(v) => patch({ partId: v })}
+        />
+      )}
+      {part.dasType === "riser" && Object.keys(dasCatalogue(plan).risers).length > 1 && (
+        <Field
+          label="Riser"
+          value={part.partId || "riser"}
+          options={Object.keys(dasCatalogue(plan).risers)}
+          optionLabels={Object.fromEntries(
+            Object.values(dasCatalogue(plan).risers).map((x) => [x.id, `${x.model || x.name}: −${fmt(x.lossDb)} dB`]),
           )}
           onChange={(v) => patch({ partId: v })}
         />
@@ -116,12 +128,14 @@ export function DasPartInspector({ plan, part, mutate, cellular }) {
       ))}
       {sourceNote(
         part.dasType === "splitter"
-          ? DEFAULT_CATALOGUE.splitters[part.partId]
+          ? dasCatalogue(plan).splitters[part.partId]
           : part.dasType === "coupler"
-            ? DEFAULT_CATALOGUE.couplers[part.partId]
+            ? dasCatalogue(plan).couplers[part.partId]
             : part.dasType === "combiner"
-              ? DEFAULT_CATALOGUE.inline[part.partId]
-              : null,
+              ? dasCatalogue(plan).inline[part.partId]
+              : part.dasType === "riser"
+                ? dasCatalogue(plan).risers[part.partId]
+                : null,
       )}
     </div>
   );
@@ -152,8 +166,8 @@ export function DasCableInspector({ plan, cable, mutate, cellular, onDelete }) {
       <Field
         label="Cable"
         value={cable.cableId || "1/2"}
-        options={Object.keys(DEFAULT_CATALOGUE.cables)}
-        optionLabels={Object.fromEntries(Object.values(DEFAULT_CATALOGUE.cables).map((x) => [x.id, x.name]))}
+        options={Object.keys(dasCatalogue(plan).cables)}
+        optionLabels={Object.fromEntries(Object.values(dasCatalogue(plan).cables).map((x) => [x.id, x.name]))}
         onChange={(v) => patch({ cableId: v })}
       />
       <Field label="Extra length (m)" type="number" value={cable.extraM ?? 0} onChange={(v) => patch({ extraM: Number(v) || 0 })} />
@@ -179,7 +193,7 @@ export function DasCableInspector({ plan, cable, mutate, cellular, onDelete }) {
           : ""}
       </p>
       {loss?.error && <p className="warn">{loss.error}</p>}
-      {sourceNote(DEFAULT_CATALOGUE.cables[cable.cableId || "1/2"])}
+      {sourceNote(dasCatalogue(plan).cables[cable.cableId || "1/2"])}
       {sourceNote(DEFAULT_CATALOGUE.connector)}
       <button type="button" className="danger-text" onClick={onDelete}>
         Delete cable
@@ -209,7 +223,7 @@ export function AntennaFeed({ plan, antenna, carrier }) {
         {fed.steps.map((s, i) => (
           <li key={i}>
             {s.kind === "cable"
-              ? `${fmt(s.lengthM)} m ${DEFAULT_CATALOGUE.cables[s.cableId]?.name || s.cableId}`
+              ? `${fmt(s.lengthM)} m ${dasCatalogue(plan).cables[s.cableId]?.name || s.cableId}`
               : s.kind === "connectors"
                 ? "connectors"
                 : `${name(s.id)}${s.port ? ` (${s.port})` : ""}`}
@@ -238,6 +252,8 @@ export function DasToolBar({
   cablePick,
   cableStartPort,
   chooseCableEnd,
+  onCableSettings,
+  onPartSettings,
 }) {
   if (!DAS_TOOL_IDS.includes(tool)) return null;
   const nameOf = (id) => plan.sources.find((s) => s.id === id)?.name || "?";
@@ -249,7 +265,7 @@ export function DasToolBar({
         <small>{cableStartPort ? "Connect to which end?" : "Start the cable at which end?"}</small>
         <div className="segmented" role="group">
           {portsOf(plan, pickItem).map((o) => {
-            const cp = pickItem.dasType === "coupler" ? DEFAULT_CATALOGUE.couplers[pickItem.partId] : null;
+            const cp = pickItem.dasType === "coupler" ? dasCatalogue(plan).couplers[pickItem.partId] : null;
             const loss = cp ? (o.id === "tap" ? couplerTapLossDb(cp) : o.id === "through" ? couplerThroughLossDb(cp) : null) : null;
             return (
               <button
@@ -286,45 +302,64 @@ export function DasToolBar({
     <div className="das-toolbar" role="toolbar" aria-label="DAS tool options">
       {tool === "splitter" && (
         <>
-          <strong>Splitter</strong>
-          {choice(
-            "splitter",
-            Object.values(DEFAULT_CATALOGUE.splitters).map((s) => [s.id, `${s.ways}-way`, `${fmt(splitterLossDb(s))} dB per output`]),
+          <strong>Splitter: {dasCatalogue(plan).splitters[dasOptions.splitter]?.model || dasCatalogue(plan).splitters[dasOptions.splitter]?.name || "–"}</strong>
+          <small>{dasCatalogue(plan).splitters[dasOptions.splitter]?.name}</small>
+          {onPartSettings && (
+            <button type="button" onClick={onPartSettings}>
+              Change…
+            </button>
           )}
           <small>Click on the plan to place it.</small>
         </>
       )}
       {tool === "coupler" && (
         <>
-          <strong>Coupler</strong>
-          {choice(
-            "coupler",
-            Object.values(DEFAULT_CATALOGUE.couplers).map((c) => [c.id, `${c.couplingDb} dB`, `tap −${fmt(couplerTapLossDb(c))} dB, through −${fmt(couplerThroughLossDb(c))} dB`]),
+          <strong>Coupler: {dasCatalogue(plan).couplers[dasOptions.coupler]?.model || dasCatalogue(plan).couplers[dasOptions.coupler]?.name || "–"}</strong>
+          <small>{dasCatalogue(plan).couplers[dasOptions.coupler]?.name}</small>
+          {onPartSettings && (
+            <button type="button" onClick={onPartSettings}>
+              Change…
+            </button>
           )}
           <small>Click on the plan to place it.</small>
         </>
       )}
       {tool === "combiner" && (
         <>
-          <strong>Combiner</strong>
-          {choice("combiner", ["cm21", "cm22", "cm44"].map((id) => [id, DEFAULT_CATALOGUE.inline[id].name.replace("Combiner ", ""), `−${fmt(DEFAULT_CATALOGUE.inline[id].lossDb)} dB`]))}
+          <strong>Combiner: {dasCatalogue(plan).inline[dasOptions.combiner]?.model || dasCatalogue(plan).inline[dasOptions.combiner]?.name || "–"}</strong>
+          <small>{dasCatalogue(plan).inline[dasOptions.combiner]?.name}</small>
+          {onPartSettings && (
+            <button type="button" onClick={onPartSettings}>
+              Change…
+            </button>
+          )}
           <small>Click on the plan to place it.</small>
         </>
       )}
-      {(tool === "dassource" || tool === "riser") && (
-        <small>
-          Click on the plan to place the {tool === "riser" ? "riser (where the cable changes floor)" : "source (BTS / repeater)"}.
-        </small>
+      {tool === "riser" && (
+        <>
+          <strong>Riser: {dasCatalogue(plan).risers[dasOptions.riser]?.model || dasCatalogue(plan).risers[dasOptions.riser]?.name || "–"}</strong>
+          {onPartSettings && (
+            <button type="button" onClick={onPartSettings}>
+              Change…
+            </button>
+          )}
+          <small>Click on the plan to place the riser (where the cable changes floor).</small>
+        </>
       )}
+      {tool === "dassource" && <small>Click on the plan to place the source (BTS / repeater).</small>}
       {tool === "dascable" && (
         <>
-          <strong>Cable</strong>
-          {choice("cable", [
-            ["auto", "Auto", '1/2" superflex; 7/8" in the riser and between floors'],
-            ["1/2", '1/2" superflex', DEFAULT_CATALOGUE.cables["1/2"].model],
-            ["7/8", '7/8" riser', DEFAULT_CATALOGUE.cables["7/8"].model],
-            ["jumper", "Jumper 1 m", DEFAULT_CATALOGUE.cables.jumper.model],
-          ])}
+          <strong>
+            Cable: {dasOptions.cable === "auto" || !dasCatalogue(plan).cables[dasOptions.cable]
+              ? "Auto"
+              : dasCatalogue(plan).cables[dasOptions.cable].name}
+          </strong>
+          {onCableSettings && (
+            <button type="button" onClick={onCableSettings}>
+              Change…
+            </button>
+          )}
           <small>
             {start && cableStartPort
               ? `From ${start.name} ${portsOf(plan, start).find((p) => p.id === cableStartPort.port)?.label || ""}: click corners along the route${

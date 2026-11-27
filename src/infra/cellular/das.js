@@ -26,7 +26,19 @@ export const dasParts = (plan, floorId) =>
   (plan?.sources || []).filter((s) => s.kind === "das" && (!floorId || s.floorId === floorId));
 
 // Parts and cables: the datasheet values of engine/catalogue.js; antennas: the project's models.
-export const dasCatalogue = (plan) => ({ ...DEFAULT_CATALOGUE, antennas: antennaModels(plan) });
+// the built-in parts plus the ones the project imported (same id: the import wins)
+export const dasCatalogue = (plan) => {
+  const own = cellularOf(plan).catalogue;
+  return {
+    ...DEFAULT_CATALOGUE,
+    antennas: antennaModels(plan),
+    splitters: { ...DEFAULT_CATALOGUE.splitters, ...own.splitters },
+    couplers: { ...DEFAULT_CATALOGUE.couplers, ...own.couplers },
+    inline: { ...DEFAULT_CATALOGUE.inline, ...own.inline },
+    risers: { ...DEFAULT_CATALOGUE.risers, ...own.risers },
+    cables: { ...DEFAULT_CATALOGUE.cables, ...own.cables },
+  };
+};
 
 // A new part placed on the plan.
 // partId: the type chosen in the tool bar (2/3/4-way, coupler dB, combiner), else the usual one
@@ -45,6 +57,7 @@ export function newDasPart(plan, dasType, floorId, { x, z }, id, { partId } = {}
     ...(dasType === "splitter" ? part("s2") : {}),
     ...(dasType === "coupler" ? part("c10") : {}),
     ...(dasType === "combiner" ? part("cm21") : {}),
+    ...(dasType === "riser" ? part("riser") : {}),
     ...(dasType === "source" ? { powerDbm: {} } : {}),
   };
 }
@@ -66,7 +79,7 @@ export function cableRoute(plan, cable) {
 // and any extra length typed (up and down walls, slack). A jumper is its fixed length.
 export function cableLengthM(plan, cable) {
   const extra = Number(cable.extraM) || 0;
-  const fixed = DEFAULT_CATALOGUE.cables[cable.cableId]?.fixedLengthM;
+  const fixed = dasCatalogue(plan).cables[cable.cableId]?.fixedLengthM;
   if (fixed) return fixed + extra;
   const route = cableRoute(plan, cable);
   if (route.length < 2) return extra;
@@ -91,7 +104,7 @@ export function cableProblem(plan, fromId, toId) {
   const out = cables.filter((c) => c.from === fromId).length;
   if (from.dasType === "coupler" && out >= 2) return `${from.name} already has its through and tap outputs.`;
   if (from.dasType === "splitter") {
-    const ways = DEFAULT_CATALOGUE.splitters[from.partId]?.ways ?? 2;
+    const ways = dasCatalogue(plan).splitters[from.partId]?.ways ?? 2;
     if (out >= ways) return `${from.name} is a ${ways}-way splitter and all its outputs are used.`;
   }
   if ((from.dasType === "riser" || from.dasType === "combiner") && out >= 1)
@@ -121,7 +134,7 @@ export function newCable(plan, fromId, toId, id, { cableId = "auto", points = []
   const outPort = free.some((p) => p.id === port) ? port : free[0]?.id;
   // a cable in the shaft (to or from a riser, or between floors) is the riser feeder
   const riser = from?.dasType === "riser" || to?.dasType === "riser" || (from && to && from.floorId !== to.floorId);
-  const chosen = DEFAULT_CATALOGUE.cables[cableId] ? cableId : riser ? RISER_CABLE_ID : DEFAULT_CABLE_ID;
+  const chosen = dasCatalogue(plan).cables[cableId] ? cableId : riser ? RISER_CABLE_ID : DEFAULT_CABLE_ID;
   return {
     id,
     from: fromId,
@@ -253,7 +266,7 @@ export function outputPorts(plan, part) {
   const cables = cellularOf(plan).cables.filter((c) => c.from === part.id);
   const ids =
     part.dasType === "splitter"
-      ? Array.from({ length: DEFAULT_CATALOGUE.splitters[part.partId]?.ways ?? 2 }, (_, i) => `out${i + 1}`)
+      ? Array.from({ length: dasCatalogue(plan).splitters[part.partId]?.ways ?? 2 }, (_, i) => `out${i + 1}`)
       : part.dasType === "coupler"
         ? ["through", "tap"]
         : part.dasType === "source"

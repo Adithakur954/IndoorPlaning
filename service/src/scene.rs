@@ -35,7 +35,9 @@ pub fn extract(bytes: &[u8], dest: &Path) -> Result<SceneSummary, String> {
         let name = relative.to_string_lossy().replace('\\', "/");
         let allowed = name == "scene.xml"
             || name == "scene_config.json"
-            || (name.starts_with("meshes/") && name.ends_with(".ply") && name.matches('/').count() == 1);
+            || (name.starts_with("meshes/")
+                && name.ends_with(".ply")
+                && name.matches('/').count() == 1);
         if !allowed {
             return Err(format!("unexpected file in scene zip: {name}"));
         }
@@ -63,8 +65,9 @@ pub fn extract(bytes: &[u8], dest: &Path) -> Result<SceneSummary, String> {
     if !has_scene {
         return Err("scene.xml is missing".into());
     }
-    let config: serde_json::Value = serde_json::from_slice(&config.ok_or("scene_config.json is missing")?)
-        .map_err(|e| format!("scene_config.json is not valid JSON: {e}"))?;
+    let config: serde_json::Value =
+        serde_json::from_slice(&config.ok_or("scene_config.json is missing")?)
+            .map_err(|e| format!("scene_config.json is not valid JSON: {e}"))?;
     if config["exportVersion"] != 1 {
         return Err("unsupported scene export version".into());
     }
@@ -80,13 +83,20 @@ pub fn extract(bytes: &[u8], dest: &Path) -> Result<SceneSummary, String> {
     if floors == 0 {
         return Err("the scene has no floors".into());
     }
-    for mesh in config["meshes"].as_array().ok_or("scene_config.json has no meshes")? {
+    for mesh in config["meshes"]
+        .as_array()
+        .ok_or("scene_config.json has no meshes")?
+    {
         let file = mesh["file"].as_str().ok_or("mesh entry without a file")?;
         if !dest.join(file).exists() {
             return Err(format!("mesh file listed but missing from zip: {file}"));
         }
     }
-    Ok(SceneSummary { content_sha256: sha, floors, access_points })
+    Ok(SceneSummary {
+        content_sha256: sha,
+        floors,
+        access_points,
+    })
 }
 
 #[cfg(test)]
@@ -99,7 +109,9 @@ mod tests {
         {
             let mut writer = zip::ZipWriter::new(&mut out);
             for (name, data) in files {
-                writer.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+                writer
+                    .start_file(*name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
                 writer.write_all(data).unwrap();
             }
             writer.finish().unwrap();
@@ -120,7 +132,8 @@ mod tests {
     }
 
     fn temp(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("sim-scene-test-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("sim-scene-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -129,7 +142,11 @@ mod tests {
     #[test]
     fn accepts_a_valid_scene() {
         let dir = temp("ok");
-        let zip = zip_of(&[("scene.xml", b"<scene/>"), ("scene_config.json", &config()), ("meshes/wall__brick.ply", b"ply")]);
+        let zip = zip_of(&[
+            ("scene.xml", b"<scene/>"),
+            ("scene_config.json", &config()),
+            ("meshes/wall__brick.ply", b"ply"),
+        ]);
         let summary = extract(&zip, &dir).unwrap();
         assert_eq!(summary.content_sha256, "a".repeat(64));
         assert_eq!((summary.floors, summary.access_points), (1, 1));
@@ -146,8 +163,12 @@ mod tests {
     fn rejects_missing_parts() {
         let dir = temp("missing");
         assert!(extract(b"not a zip", &dir).is_err());
-        assert!(extract(&zip_of(&[("scene_config.json", &config())]), &dir).unwrap_err().contains("scene.xml"));
+        assert!(extract(&zip_of(&[("scene_config.json", &config())]), &dir)
+            .unwrap_err()
+            .contains("scene.xml"));
         let no_mesh = zip_of(&[("scene.xml", b"<scene/>"), ("scene_config.json", &config())]);
-        assert!(extract(&no_mesh, &dir).unwrap_err().contains("missing from zip"));
+        assert!(extract(&no_mesh, &dir)
+            .unwrap_err()
+            .contains("missing from zip"));
     }
 }

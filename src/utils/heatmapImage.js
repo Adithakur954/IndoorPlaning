@@ -11,14 +11,42 @@ const hexToRgb = (hex) => {
 
 // Colour of a dBm value from the same threshold bands the measurement logs
 // use ({ min, max, color }), so a log dot and the map beneath it agree.
+// Bands marked `smooth` (the cellular map by default) blend instead: each band's
+// colour sits at its lower edge and values in between mix the two neighbours.
 export function rangesColorFn(ranges) {
   const bands = openEndedBands(ranges).map((r) => ({
     min: Number(r.min ?? -Infinity),
     max: Number(r.max ?? Infinity),
     rgb: hexToRgb(r.color),
   }));
+  if ((ranges || []).some((r) => r?.smooth)) return gradientColorFn(bands);
   return (dbm) =>
     bands.find((band) => dbm >= band.min && dbm < band.max)?.rgb ?? GREY;
+}
+
+export function gradientStops(bands) {
+  return bands
+    .filter((b) => Number.isFinite(b.min))
+    .sort((a, b) => a.min - b.min)
+    .map((b) => ({ value: b.min, rgb: b.rgb ?? hexToRgb(b.color) }));
+}
+
+function gradientColorFn(bands) {
+  const stops = gradientStops(bands);
+  const below = bands.find((b) => !Number.isFinite(b.min))?.rgb ?? stops[0]?.rgb ?? GREY;
+  return (dbm) => {
+    if (!stops.length || !Number.isFinite(dbm)) return GREY;
+    if (dbm < stops[0].value) return below;
+    for (let i = 1; i < stops.length; i++) {
+      const a = stops[i - 1],
+        b = stops[i];
+      if (dbm < b.value) {
+        const t = (dbm - a.value) / (b.value - a.value);
+        return a.rgb.map((v, k) => Math.round(v + (b.rgb[k] - v) * t));
+      }
+    }
+    return stops[stops.length - 1].rgb;
+  };
 }
 
 // Returns { width, height, data (RGBA), x, z, widthM, heightM } or null.

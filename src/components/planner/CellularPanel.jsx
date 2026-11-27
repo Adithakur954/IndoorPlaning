@@ -105,7 +105,7 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
       setCatalogueNote({ error: `${name} was not imported: ${errors.slice(0, 4).join("; ")}` });
       return;
     }
-    setCellular((cur) => ({ ...cur, catalogue: { antennas: { ...cur.catalogue.antennas, ...antennas } } }));
+    setCellular((cur) => ({ ...cur, catalogue: { ...cur.catalogue, antennas: { ...cur.catalogue.antennas, ...antennas } } }));
     setCatalogueNote({ ok: `${Object.keys(antennas).length} antenna models imported from ${name}.` });
   };
   const importCatalogue = async (file) => addCatalogue(await file.text(), file.name);
@@ -127,7 +127,7 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
     if (!id) return;
     try {
       const entry = withPatternFile(models[id], await file.text(), file.name);
-      setCellular((cur) => ({ ...cur, catalogue: { antennas: { ...cur.catalogue.antennas, [id]: entry } } }));
+      setCellular((cur) => ({ ...cur, catalogue: { ...cur.catalogue, antennas: { ...cur.catalogue.antennas, [id]: entry } } }));
       setCatalogueNote({ ok: `${file.name} attached to ${entry.name}.` });
     } catch (e) {
       setCatalogueNote({ error: e.message });
@@ -724,7 +724,7 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
                     onClick={() =>
                       setCellular((cur) => {
                         const { [m.id]: _gone, ...rest } = cur.catalogue.antennas; // eslint-disable-line no-unused-vars
-                        return { ...cur, catalogue: { antennas: rest } };
+                        return { ...cur, catalogue: { ...cur.catalogue, antennas: rest } };
                       })
                     }
                   >

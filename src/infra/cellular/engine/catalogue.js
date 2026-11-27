@@ -96,6 +96,10 @@ export const DEFAULT_CATALOGUE = {
     cm44: { id: "cm44", name: "Combiner 4x4", lossDb: 7.0, maxPowerW: 100, model: "FR-CM0740-4F-2C-44", source: FROG("Combiner 4x4 FR-CM0740-4F-2C-44 (insertion loss 7.0 ± 0.2 dB)") },
     combiner: { id: "combiner", name: "combiner (series loss)", lossDb: 0.5, maxPowerW: 200, source: ILLUSTRATIVE },
   },
+  // where a cable changes floor: no part of its own unless the project imports one
+  risers: {
+    riser: { id: "riser", name: "Floor transition (no loss)", lossDb: 0, source: "no part: the point where the cable changes floor" },
+  },
   // each cable end: an N connector / adaptor
   connector: { id: "n-adaptor", name: "N connector / adaptor", lossDb: 0.1, model: "FR-AD0040-NMRA-NFXX-XC", source: FROG("RF Adaptor FR-AD0040-NMRA-NFXX-XC (insertion loss <= 0.1 dB)") },
 };

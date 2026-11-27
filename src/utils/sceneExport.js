@@ -12,6 +12,7 @@ import {
   pointsOf,
 } from "./geometry.js";
 import { buildWalls } from "./wallGraph.js";
+import { looseWallPieces } from "./wallPieces.js";
 import { sanitizeOverrides } from "./materialModel.js";
 
 // Plan space is Y-up with the floor on the X/Z plane (as in Plan3D).
@@ -184,7 +185,11 @@ function validate(plan, floors) {
           );
   }
   for (const item of [...plan.doors, ...plan.windows])
-    if (!plan.rooms.some((r) => r.id === item.roomId))
+    if (
+      item.wallId
+        ? !plan.interiorWalls.some((w) => w.id === item.wallId)
+        : !plan.rooms.some((r) => r.id === item.roomId)
+    )
       warnings.push(
         `Opening ${item.id} references a missing room and is ignored.`,
       );
@@ -301,16 +306,35 @@ export async function buildSceneFiles(plan, options = {}) {
         );
         continue;
       }
-      const h = Number(w.height) || 3;
-      meshes.quad(
-        "interior-wall",
-        w.material || "drywall",
-        [+w.x1, y0, +w.z1],
-        [+w.x2, y0, +w.z2],
-        [+w.x2, y0 + h, +w.z2],
-        [+w.x1, y0 + h, +w.z1],
-      );
-      stats.wallPieces++;
+      // the wall around its own doors and windows, which get their own surfaces
+      const { length, pieces, openings } = looseWallPieces(w, plan.doors, plan.windows);
+      const at = (t, y) => [
+        +w.x1 + ((w.x2 - w.x1) * t) / (length || 1),
+        y0 + y,
+        +w.z1 + ((w.z2 - w.z1) * t) / (length || 1),
+      ];
+      for (const p of pieces) {
+        meshes.quad(
+          "interior-wall",
+          w.material || "drywall",
+          at(p.from, p.bottom),
+          at(p.to, p.bottom),
+          at(p.to, p.top),
+          at(p.from, p.top),
+        );
+        stats.wallPieces++;
+      }
+      for (const o of openings) {
+        meshes.quad(
+          o.kind,
+          o.kind === "window" ? "glass" : "wood",
+          at(o.start, o.bottom),
+          at(o.end, o.bottom),
+          at(o.end, o.top),
+          at(o.start, o.top),
+        );
+        stats.openings++;
+      }
     }
     if (includeFurniture)
       for (const f of plan.furniture.filter((f) => f.floorId === floor.id)) {

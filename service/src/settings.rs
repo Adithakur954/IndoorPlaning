@@ -58,7 +58,12 @@ impl Settings {
         };
         range("resolutionM", self.resolution_m, 0.1, 10.0)?;
         range("maxDepth", self.max_depth as f64, 0.0, 20.0)?;
-        range("samplesPerTx", self.samples_per_tx as f64, 10_000.0, 100_000_000.0)?;
+        range(
+            "samplesPerTx",
+            self.samples_per_tx as f64,
+            10_000.0,
+            100_000_000.0,
+        )?;
         range("weakThresholdDbm", self.weak_threshold_dbm, -150.0, 0.0)?;
         range("receiverGainDbi", self.receiver_gain_dbi, -20.0, 30.0)?;
         range("noiseFloor24Dbm", self.noise_floor_24_dbm, -110.0, -60.0)?;
@@ -126,13 +131,34 @@ mod tests {
     #[test]
     fn rejects_out_of_range_values() {
         for s in [
-            Settings { resolution_m: 0.0, ..Default::default() },
-            Settings { resolution_m: f64::NAN, ..Default::default() },
-            Settings { max_depth: 99, ..Default::default() },
-            Settings { samples_per_tx: 1, ..Default::default() },
-            Settings { device: "tpu".into(), ..Default::default() },
-            Settings { noise_floor_5_dbm: -120.0, ..Default::default() },
-            Settings { noise_floor_24_dbm: -50.0, ..Default::default() },
+            Settings {
+                resolution_m: 0.0,
+                ..Default::default()
+            },
+            Settings {
+                resolution_m: f64::NAN,
+                ..Default::default()
+            },
+            Settings {
+                max_depth: 99,
+                ..Default::default()
+            },
+            Settings {
+                samples_per_tx: 1,
+                ..Default::default()
+            },
+            Settings {
+                device: "tpu".into(),
+                ..Default::default()
+            },
+            Settings {
+                noise_floor_5_dbm: -120.0,
+                ..Default::default()
+            },
+            Settings {
+                noise_floor_24_dbm: -50.0,
+                ..Default::default()
+            },
         ] {
             assert!(s.validate().is_err(), "{s:?}");
         }
@@ -141,9 +167,15 @@ mod tests {
     #[test]
     fn device_does_not_change_the_cache_key() {
         let a = Settings::default();
-        let b = Settings { device: "cpu".into(), ..Default::default() };
+        let b = Settings {
+            device: "cpu".into(),
+            ..Default::default()
+        };
         assert_eq!(a.cache_fingerprint(), b.cache_fingerprint());
-        let c = Settings { max_depth: 3, ..Default::default() };
+        let c = Settings {
+            max_depth: 3,
+            ..Default::default()
+        };
         assert_ne!(a.cache_fingerprint(), c.cache_fingerprint());
     }
 
@@ -155,6 +187,9 @@ mod tests {
         assert!(s.validate().is_ok());
         assert_eq!(s.to_worker_job("a", "b")["noise_floor_5_dbm"], -92.0);
         // a result computed with another noise figure has other SNR values
-        assert_ne!(Settings::default().cache_fingerprint(), s.cache_fingerprint());
+        assert_ne!(
+            Settings::default().cache_fingerprint(),
+            s.cache_fingerprint()
+        );
     }
 }

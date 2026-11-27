@@ -113,7 +113,15 @@ export function cellularOf(plan) {
   const c = plan?.cellular || {};
   return {
     version: 1,
-    catalogue: { antennas: { ...(c.catalogue?.antennas || {}) } },
+    // imported models: antennas, and DAS parts (splitters, couplers, combiners)
+    catalogue: {
+      antennas: { ...(c.catalogue?.antennas || {}) },
+      splitters: { ...(c.catalogue?.splitters || {}) },
+      couplers: { ...(c.catalogue?.couplers || {}) },
+      inline: { ...(c.catalogue?.inline || {}) },
+      risers: { ...(c.catalogue?.risers || {}) },
+      cables: { ...(c.catalogue?.cables || {}) },
+    },
     carriers: Array.isArray(c.carriers) ? c.carriers : [],
     sectors: Array.isArray(c.sectors) && c.sectors.length ? c.sectors : [{ id: "sector-1", name: "Sector 1" }],
     // DAS cables between parts (plan sources of kind "das") and antennas, see das.js

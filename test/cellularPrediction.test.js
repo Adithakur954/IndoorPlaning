@@ -142,7 +142,7 @@ test("the cellular job has every antenna with its pattern, power, sector and pos
   assert.deepEqual(a1.position, [4, -5, 3.4]);
   // 3.5 m wanted in a 3 m room on a floor at 4 m: 5 cm under the ceiling
   assert.deepEqual(a2.position, [16, -5, 6.95]);
-  assert.equal(notes.length, 1);
+  assert.equal(notes.length, 0); // placed under the ceiling without a note per antenna
   assert.deepEqual(a2.orientationDeg, [-180, 0, 0]);
   assert.equal(a1.powerDbm, 12);
   assert.equal(request.patterns["test-omni@2350"].gainDbi, 5);

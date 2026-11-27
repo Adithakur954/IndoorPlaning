@@ -135,6 +135,13 @@ export function useCellularPrediction({ plan, mutate, showOnMap }) {
 
   const ranges = useMemo(() => mapRanges(plan, metric), [plan, metric]);
   const threshold = metric === "sinr" ? Number(c.settings.sinrTargetDb) : Number(c.settings.rsrpTargetDbm);
+  // display only (not part of the run request): smooth gradient or flat bands
+  const mapStyle = c.settings.mapStyle === "bands" ? "bands" : "smooth";
+  const setMapStyle = (style) =>
+    mutate((p) => {
+      const cur = p.cellular || {};
+      return { ...p, cellular: { ...cur, settings: { ...(cur.settings || {}), mapStyle: style } } };
+    });
 
   // heatmap cells of one floor for the map (empty when nothing is loaded)
   const cellsFor = (floorId) => {
@@ -167,6 +174,8 @@ export function useCellularPrediction({ plan, mutate, showOnMap }) {
     finishedAt: savedRun?.finishedAt || null,
     ranges,
     threshold,
+    mapStyle,
+    setMapStyle,
     cellsFor,
     statsFor,
     runPrediction,

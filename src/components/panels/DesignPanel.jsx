@@ -22,12 +22,15 @@ import MapLegend from "../planner/MapLegend.jsx";
 import CellularPanel from "../planner/CellularPanel.jsx";
 import CellularLegend from "../planner/CellularLegend.jsx";
 import { DasCableInspector, DasPartInspector, DasToolBar } from "../planner/DasInspector.jsx";
+import PartPickerDialog, { PART_TYPES } from "../planner/PartPickerDialog.jsx";
 import { DAS_TYPES } from "../../infra/cellular/das.js";
+import { cellularOf } from "../../infra/cellular/model.js";
 import PredictionPanel from "../planner/PredictionPanel.jsx";
 import OptimizationPanel from "../planner/OptimizationPanel.jsx";
 import { uid } from "../../models/plan.js";
 import { areaOf, pointsOf, resizePolygonPoints } from "../../utils/geometry.js";
 import { num } from "../../utils/number.js";
+import { distanceAlongWall, mergeableWalls, roomOutlineFromWalls } from "../../utils/wallRoom.js";
 
 export default function DesignPanel({
   zoom,
@@ -70,6 +73,9 @@ export default function DesignPanel({
   convertRoomToBoundary,
   splitRoomInFour,
   makeRoomFromWalls,
+  breakWall,
+  mergeWalls,
+  splitRoomIntoWalls,
   convertBoundaryToRoom,
   moveBoundaryTo,
   heatmap,
@@ -114,6 +120,7 @@ export default function DesignPanel({
   cablePoints = [],
   antennaPowers = {},
   dasPorts = {},
+  bendCable,
   dasOptions,
   setDasOptions,
   cancelCable,
@@ -124,6 +131,41 @@ export default function DesignPanel({
   chooseCableEnd,
 }) {
   const unit = useMeasurementUnit();
+  // the Splitter, Coupler, Combiner, Riser and Cable tools open the "Select part" window
+  const [partDialog, setPartDialog] = useState(false);
+  useEffect(() => {
+    setPartDialog(Boolean(PART_TYPES[tool]));
+  }, [tool]);
+  // the wall waiting for a click on the 2D plan that says where to split it
+  const [splitPick, setSplitPick] = useState(null);
+  // walls lit on the plan while the pointer is on a button that uses them
+  const [wallHighlight, setWallHighlight] = useState([]);
+  useEffect(() => setWallHighlight([]), [selected]);
+  const floorWalls = obj && selected?.type === "wall"
+    ? plan.interiorWalls.filter((w) => w.floorId === obj.floorId)
+    : [];
+  const wallTolerance = Math.max(0.3, Number(plan.wallThickness) || 0.2);
+  const mergeCandidates = floorWalls.length ? mergeableWalls(floorWalls, obj.id, wallTolerance) : [];
+  const light = (ids) => ({
+    onMouseEnter: () => setWallHighlight(ids),
+    onMouseLeave: () => setWallHighlight([]),
+    onFocus: () => setWallHighlight(ids),
+    onBlur: () => setWallHighlight([]),
+  });
+  useEffect(() => {
+    if (splitPick && !(selected?.type === "wall" && selected.id === splitPick)) setSplitPick(null);
+  }, [selected, splitPick]);
+  useEffect(() => {
+    if (!splitPick) return undefined;
+    const onKey = (e) => e.key === "Escape" && setSplitPick(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [splitPick]);
+  const splitWallAt = (p) => {
+    const wall = plan.interiorWalls.find((w) => w.id === splitPick);
+    setSplitPick(null);
+    if (wall) breakWall(wall.id, distanceAlongWall(wall, p));
+  };
   const [panelWidth, setPanelWidthState] = useState(() => {
     try {
       const saved = Number(localStorage.getItem("planner.panelWidth"));
@@ -219,6 +261,31 @@ export default function DesignPanel({
               cablePick={cablePick}
               cableStartPort={cableStartPort}
               chooseCableEnd={chooseCableEnd}
+              onCableSettings={() => setPartDialog(true)}
+              onPartSettings={() => setPartDialog(true)}
+            />
+          )}
+          {partDialog && PART_TYPES[tool] && dasOptions && (
+            <PartPickerDialog
+              key={tool}
+              tool={tool}
+              value={dasOptions[PART_TYPES[tool].option]}
+              extras={{ connectors: dasOptions.cableConnectors, extraM: dasOptions.cableExtraM }}
+              plan={plan}
+              mutate={mutate}
+              carrierMHz={Number(cellularOf(plan).carriers.find((x) => x.id === cellular?.carrierId)?.freqMHz) || null}
+              onPick={(id, extras) => {
+                setDasOptions((o) => ({
+                  ...o,
+                  [PART_TYPES[tool].option]: id,
+                  ...(extras ? { cableConnectors: extras.connectors, cableExtraM: extras.extraM } : {}),
+                }));
+                setPartDialog(false);
+              }}
+              onCancel={() => {
+                setPartDialog(false);
+                setTool("select");
+              }}
             />
           )}
           {workspace === "cellular" && cellular?.hasResult && cellular.show ? (
@@ -301,6 +368,11 @@ export default function DesignPanel({
                 portInfo,
                 cablePick,
                 cableStartPort,
+                splitWallId: splitPick,
+                onCableBend: bendCable,
+                highlightWalls: wallHighlight,
+                onSplitWallAt: splitWallAt,
+                onSplitWallCancel: () => setSplitPick(null),
               }}
             />
           )}
@@ -473,6 +545,13 @@ export default function DesignPanel({
                         ? ["name", "x1", "z1", "x2", "z2", "material"]
                         : selected.type === "furniture"
                           ? ["name", "x", "z", "width", "depth", "height"]
+                          : obj.wallId
+                            ? [
+                                "offset",
+                                "width",
+                                "height",
+                                ...(selected.type === "window" ? ["sillHeight"] : []),
+                              ]
                           : [
                               "roomId",
                               "wallSide",
@@ -813,27 +892,69 @@ export default function DesignPanel({
                     ))}
                   </div>
                 )}
+                {selected.type === "wall" &&
+                  mergeWalls &&
+                  mergeCandidates.map((other) => (
+                    <button
+                      key={other.id}
+                      type="button"
+                      className="secondary-button"
+                      title={`Joins this wall and ${other.name || "the wall next to it"} (lit on the plan) into one straight wall. Doors and windows stay where they are.`}
+                      {...light([obj.id, other.id])}
+                      onClick={() => {
+                        setWallHighlight([]);
+                        mergeWalls(obj.id, other.id);
+                      }}
+                    >
+                      {mergeCandidates.length > 1
+                        ? `Merge with ${other.name || "wall"} into one wall`
+                        : "Merge into one wall"}
+                    </button>
+                  ))}
+                {selected.type === "wall" && (
+                  <button
+                    type="button"
+                    className={`secondary-button${splitPick === obj.id ? " active" : ""}`}
+                    disabled={view === "3d"}
+                    title={
+                      view === "3d"
+                        ? "Switch to the 2D view to pick the split point."
+                        : "Then click on the wall where it should split into two walls. Esc cancels."
+                    }
+                    onClick={() => setSplitPick(splitPick === obj.id ? null : obj.id)}
+                  >
+                    {splitPick === obj.id ? "Click on the wall… (cancel)" : "Split wall at a point"}
+                  </button>
+                )}
                 {selected.type === "wall" && (
                   <button
                     type="button"
                     className="secondary-button"
                     title="Makes one room from this wall and the walls joined to it end to end. An open chain (e.g. three sides) is closed with a straight side. The loose walls are replaced by the room's own walls."
-                    onClick={() => makeRoomFromWalls(obj.id)}
+                    {...light(
+                      (() => {
+                        const found = roomOutlineFromWalls(floorWalls, obj.id, wallTolerance);
+                        return found.error ? [obj.id] : found.wallIds;
+                      })(),
+                    )}
+                    onClick={() => {
+                      setWallHighlight([]);
+                      makeRoomFromWalls(obj.id);
+                    }}
                   >
                     Make room from walls
                   </button>
                 )}
-                {selected.type === "room" &&
-                  (!obj.shape || obj.shape === "rectangle") && (
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      title="Divides this room into four equal rooms (two by two). Outer wall materials, doors and windows are kept."
-                      onClick={() => splitRoomInFour(obj.id)}
-                    >
-                      Split into 4 rooms
-                    </button>
-                  )}
+                {selected.type === "room" && obj.shape !== "circle" && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    title="Replaces this room with separate walls, one per side, so each can be moved, split or deleted. Wall materials, height, doors and windows are kept."
+                    onClick={() => splitRoomIntoWalls(obj.id)}
+                  >
+                    Split into {(obj.shape === "polygon" ? obj.polygonPoints?.length : 4) || 4} walls
+                  </button>
+                )}
                 {selected.type === "room" && (
                   <button
                     type="button"

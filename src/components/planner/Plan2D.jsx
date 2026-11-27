@@ -59,13 +59,13 @@ function Connector({ x, z, size, free, label, side, font, stroke, chosen, onPick
       />
       {label && (
         <text
-          x={side === "left" ? x - size : x + size}
-          y={z}
+          x={side === "left" ? x - size : side === "below" || side === "above" ? x : x + size}
+          y={side === "below" ? z + size * 0.75 : side === "above" ? z - size * 0.75 : z}
           fontSize={font}
           fontWeight={700}
           fill={chosen ? "#15803d" : free ? "#c2410c" : "#6b7280"}
-          textAnchor={side === "left" ? "end" : "start"}
-          dominantBaseline="middle"
+          textAnchor={side === "left" ? "end" : side === "below" || side === "above" ? "middle" : "start"}
+          dominantBaseline={side === "below" ? "hanging" : side === "above" ? "auto" : "middle"}
           className="plan-label"
         >
           {label}
@@ -192,6 +192,14 @@ export default function Plan2D({
   // Cable tool: the item whose end is being chosen, and the chosen start end
   cablePick = null,
   cableStartPort = null,
+  // reshape a drawn cable: (cableId, "insert" | "move" | "remove", index in its bends, point)
+  onCableBend,
+  // walls lit while the pointer is on a button that uses them (merge, make room)
+  highlightWalls = [],
+  // a wall waiting for the click that says where to split it
+  splitWallId = null,
+  onSplitWallAt,
+  onSplitWallCancel,
 }) {
   const unit = useMeasurementUnit();
   const shown = (id) => !hiddenLayers.includes(id);
@@ -205,11 +213,14 @@ export default function Plan2D({
     [rectDraft, setRectDraft] = useState(null),
     [pan, setPan] = useState({ x: 0, z: 0 }),
     // the DAS part or antenna under the pointer while drawing a cable
-    [hoverId, setHoverId] = useState(null);
+    [hoverId, setHoverId] = useState(null),
+    // where the wall being split would be cut, under the pointer
+    [splitCursor, setSplitCursor] = useState(null);
   const rooms = plan.rooms.filter((r) => r.floorId === floorId),
     doors = plan.doors.filter((d) => d.floorId === floorId),
     windows = plan.windows.filter((w) => w.floorId === floorId),
     walls = plan.interiorWalls.filter((w) => w.floorId === floorId),
+    splitTarget = splitWallId ? walls.find((w) => w.id === splitWallId) : null,
     sources = plan.sources.filter((s) => s.floorId === floorId),
     furniture = plan.furniture.filter((f) => f.floorId === floorId);
   useEffect(() => {
@@ -359,7 +370,23 @@ export default function Plan2D({
     };
     e.currentTarget.setPointerCapture(e.pointerId);
   };
+  // the point on the wall being split nearest to the pointer
+  const splitPoint = (e) => {
+    const p = point(e),
+      x1 = +splitTarget.x1,
+      z1 = +splitTarget.z1,
+      dx = +splitTarget.x2 - x1,
+      dz = +splitTarget.z2 - z1,
+      len2 = dx * dx + dz * dz || 1,
+      t = Math.max(0, Math.min(1, ((p.x - x1) * dx + (p.z - z1) * dz) / len2));
+    return { x: x1 + dx * t, z: z1 + dz * t };
+  };
   const move = (e) => {
+    if (splitTarget && !panDrag.current) {
+      setSplitCursor(splitPoint(e));
+      svg.current.style.cursor = "crosshair";
+      return;
+    }
     if (panDrag.current) {
       const { startX, startY, origin, unitXPerPixel, unitYPerPixel } =
         panDrag.current;
@@ -391,6 +418,15 @@ export default function Plan2D({
     const d = drag.current;
     if (Math.hypot(e.clientX - d.pointer.x, e.clientY - d.pointer.y) < 4)
       return;
+    if (d.type === "cable-bend") {
+      const at = point(e);
+      // a handle in the middle of a piece becomes a bend once it is pulled
+      if (d.insert) {
+        onCableBend?.(d.cableId, "insert", d.index, at);
+        d.insert = false;
+      } else onCableBend?.(d.cableId, "move", d.index, at);
+      return;
+    }
     const p = point(e, false),
       rawX = p.x - d.origin.x,
       rawZ = p.z - d.origin.z,
@@ -674,12 +710,23 @@ export default function Plan2D({
       })
     : [];
   const opening = (item, i, type) => {
-    const r = rooms.find((r) => r.id === item.roomId);
-    if (!r) return null;
-    const b = bbox(r),
+    const lone = item.wallId ? walls.find((w) => w.id === item.wallId) : null;
+    const r = lone ? null : rooms.find((r) => r.id === item.roomId);
+    if (!r && !lone) return null;
+    const b = r ? bbox(r) : null,
       off = +item.offset,
       w = +item.width;
     let x1, x2, z1, z2;
+    // on a loose wall: `offset` runs from the wall's first end
+    if (lone) {
+      const len = Math.hypot(lone.x2 - lone.x1, lone.z2 - lone.z1) || 1;
+      const ux = (lone.x2 - lone.x1) / len,
+        uz = (lone.z2 - lone.z1) / len;
+      x1 = +lone.x1 + ux * off;
+      z1 = +lone.z1 + uz * off;
+      x2 = x1 + ux * w;
+      z2 = z1 + uz * w;
+    } else
     // polygon rooms have no sides: the opening sits on edge i (vertex i -> i + 1)
     if (r.shape !== "rectangle" && Number.isInteger(+item.edgeIndex)) {
       const pts = pointsOf(r),
@@ -731,8 +778,14 @@ export default function Plan2D({
   return (
     <div className="plan2d">
       {shown("compass") && <PlanCompass alignment={plan.alignment} />}
-      {(poly.length > 0 || wallStart || tool === "rectangle") && (
+      {(poly.length > 0 || wallStart || tool === "rectangle" || splitTarget) && (
         <div className="plan-canvas-actions">
+          {splitTarget && (
+            <>
+              <span>Click on the wall where it should split · Esc cancels</span>
+              <button onClick={() => onSplitWallCancel?.()}>Cancel</button>
+            </>
+          )}
           {tool === "rectangle" && (
             <span>
               {rectDraft
@@ -760,7 +813,17 @@ export default function Plan2D({
         viewBox={`${minX + (width - viewWidth) / 2 + pan.x} ${
           minZ + (height - viewHeight) / 2 + pan.z
         } ${viewWidth} ${viewHeight}`}
-        onPointerDownCapture={startPan}
+        onPointerDownCapture={(e) => {
+          if (splitTarget && !e.ctrlKey && e.button === 0) {
+            // the click says where the wall splits; nothing else is picked
+            e.preventDefault();
+            e.stopPropagation();
+            onSplitWallAt?.(splitPoint(e));
+            setSplitCursor(null);
+            return;
+          }
+          startPan(e);
+        }}
         onWheel={(e) => {
           e.preventDefault();
           onZoom?.(
@@ -1065,6 +1128,47 @@ export default function Plan2D({
                     {c.label.text}
                   </text>
                 )}
+                {on && tool === "select" && onCableBend && c.route && (
+                  // pull a round handle (the middle of a piece) to bend the cable there;
+                  // drag a square (a bend) to move it, double-click it to take it out
+                  <g className="cable-bends">
+                    {c.route.slice(0, -1).map((a, i) => {
+                      const b = c.route[i + 1];
+                      if (a.floorId !== floorId || b.floorId !== floorId) return null;
+                      if (Math.hypot(b.x - a.x, b.z - a.z) < apR * 1.5) return null;
+                      const mx = (a.x + b.x) / 2,
+                        mz = (a.z + b.z) / 2;
+                      return (
+                        <g key={`m${i}`} className="cable-mid" onPointerDown={(e) => {
+                          e.stopPropagation();
+                          drag.current = { type: "cable-bend", cableId: c.id, index: i, insert: true, pointer: { x: e.clientX, y: e.clientY } };
+                          svg.current.setPointerCapture(e.pointerId);
+                        }}>
+                          <title>Pull to bend the cable here</title>
+                          <circle cx={mx} cy={mz} r={apR * 0.9} fill="transparent" />
+                          <circle cx={mx} cy={mz} r={apR * 0.42} fill="#fff" stroke="#e8790a" strokeWidth={apStroke} />
+                          <path d={`M${mx - apR * 0.2} ${mz}h${apR * 0.4}M${mx} ${mz - apR * 0.2}v${apR * 0.4}`} stroke="#e8790a" strokeWidth={apStroke * 0.8} />
+                        </g>
+                      );
+                    })}
+                    {c.route.slice(1, -1).map((p, j) =>
+                      p.floorId !== floorId ? null : (
+                        <g key={`b${j}`} className="cable-bend" onPointerDown={(e) => {
+                          e.stopPropagation();
+                          drag.current = { type: "cable-bend", cableId: c.id, index: j, insert: false, pointer: { x: e.clientX, y: e.clientY } };
+                          svg.current.setPointerCapture(e.pointerId);
+                        }} onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          onCableBend(c.id, "remove", j);
+                        }}>
+                          <title>Drag to move this bend; double-click to take it out</title>
+                          <rect x={p.x - apR * 0.8} y={p.z - apR * 0.8} width={apR * 1.6} height={apR * 1.6} fill="transparent" />
+                          <rect x={p.x - apR * 0.36} y={p.z - apR * 0.36} width={apR * 0.72} height={apR * 0.72} rx={apR * 0.1} fill="#e8790a" stroke="#fff" strokeWidth={apStroke * 0.7} />
+                        </g>
+                      ),
+                    )}
+                  </g>
+                )}
               </g>
             );
           })}
@@ -1092,6 +1196,27 @@ export default function Plan2D({
           const endSize = apR * (picking ? 1.0 : big ? 0.75 : 0.5);
           const pick = (port, dir) => () => onPlace("dasport", { id: s.id, port, dir });
           const isStart = (port) => cableStartPort?.id === s.id && cableStartPort.port === port;
+          // a DAS part being joined opens out into a bar: the input at its left end, the
+          // outputs hanging below it (a coupler's through output at the right end)
+          const bar = big && s.kind === "das" && ports;
+          const outs = bar ? ports.ports || [] : [];
+          // a coupler's through output (or a part's only output) at the right end, in line
+          // with the input; a splitter's outputs above and below the bar in turn, each
+          // pair facing each other: 1 above, 2 below, 3 above, 4 below
+          const endOut = bar
+            ? (s.dasType === "coupler" ? outs.find((o) => o.id === "through") : outs.length === 1 ? outs[0] : null) || null
+            : null;
+          const rest = outs.filter((o) => o !== endOut);
+          const tapOnly = s.dasType === "coupler";
+          const above = tapOnly ? [] : rest.filter((_, i) => i % 2 === 0),
+            below = tapOnly ? rest : rest.filter((_, i) => i % 2 === 1);
+          const gap = endSize * 2.6;
+          const barH = apR * 1.35;
+          const barL = Math.max(apR * 5.5, apR * 3.2 + Math.max(below.length, above.length) * gap);
+          const bx = +s.x - barL / 2,
+            by = +s.z - barH / 2;
+          const sideX = (list, i) => bx + barL - apR * 0.9 - (list.length - 1 - i) * gap;
+          const shortLabel = (label) => (s.dasType === "splitter" ? label.replace(/^Out /, "") : label);
           return (
           <g
             key={s.id}
@@ -1104,14 +1229,51 @@ export default function Plan2D({
               <circle cx={s.x} cy={s.z} r={apR * 1.8} fill="none" stroke="#e8790a" strokeWidth={apStroke * 1.5} strokeDasharray={`${apR / 2} ${apR / 3}`} />
             )}
             {portInfo[s.id] && <title>{portInfo[s.id]}</title>}
-            {big && <circle cx={s.x} cy={s.z} r={apR * 2.1} fill="#e8790a" fillOpacity="0.14" stroke="#e8790a" strokeWidth={apStroke} />}
-            <g transform={big ? `translate(${s.x} ${s.z}) scale(${k}) translate(${-s.x} ${-s.z})` : undefined}>
-              <SourceSymbol s={s} r={apR} stroke={apStroke} selected={selected?.type === "source" && selected.id === s.id} />
-            </g>
-            {(s.kind !== "wifi" || showWifiNames) && (
+            {bar ? (
+              <g className="das-bar">
+                <rect
+                  x={bx - endSize * 1.6}
+                  y={by - (above.length ? endSize * 2.5 + apFont : endSize * 1.1)}
+                  width={barL + endSize * 3.2 + (endOut ? endSize * 1.2 : 0)}
+                  height={barH + endSize * 3.6 + apFont + (above.length ? endSize * 1.4 + apFont : 0)}
+                  rx={endSize}
+                  fill="#e8790a"
+                  fillOpacity="0.1"
+                  stroke="#e8790a"
+                  strokeWidth={apStroke * 0.7}
+                />
+                <rect x={bx} y={by} width={barL} height={barH} rx={barH * 0.16} fill="#eef1f0" stroke="#2f3b39" strokeWidth={apStroke} />
+                <text
+                  x={bx + apR * 0.45}
+                  y={+s.z}
+                  fontSize={apFont * 0.95}
+                  fontWeight={700}
+                  fill="#2f3b39"
+                  dominantBaseline="middle"
+                  className="plan-label"
+                  pointerEvents="none"
+                >
+                  {s.name}
+                </text>
+                {below.map((o, i) => (
+                  <line key={o.id} x1={sideX(below, i)} x2={sideX(below, i)} y1={by + barH} y2={by + barH + endSize * 0.9} stroke="#2f3b39" strokeWidth={apStroke * 0.8} />
+                ))}
+                {above.map((o, i) => (
+                  <line key={o.id} x1={sideX(above, i)} x2={sideX(above, i)} y1={by} y2={by - endSize * 0.9} stroke="#2f3b39" strokeWidth={apStroke * 0.8} />
+                ))}
+              </g>
+            ) : (
+              <>
+                {big && <circle cx={s.x} cy={s.z} r={apR * 2.1} fill="#e8790a" fillOpacity="0.14" stroke="#e8790a" strokeWidth={apStroke} />}
+                <g transform={big ? `translate(${s.x} ${s.z}) scale(${k}) translate(${-s.x} ${-s.z})` : undefined}>
+                  <SourceSymbol s={s} r={apR} stroke={apStroke} selected={selected?.type === "source" && selected.id === s.id} />
+                </g>
+              </>
+            )}
+            {(s.kind !== "wifi" || showWifiNames) && !bar && (
               <text
                 x={labelSpots[`s:${s.id}`]?.x ?? s.x}
-                y={labelSpots[`s:${s.id}`]?.y ?? +s.z - apR - apFont * 0.7}
+                y={bar ? by - endSize * 1.1 - apFont * 0.7 : labelSpots[`s:${s.id}`]?.y ?? +s.z - apR - apFont * 0.7}
                 fontSize={apFont}
                 fontWeight={600}
                 textAnchor="middle"
@@ -1138,7 +1300,70 @@ export default function Plan2D({
                 {antennaPowers[s.id].toFixed(1)} dBm
               </text>
             )}
-            {ports && (
+            {bar && (
+              // the bar's ends: orange = free, grey = used, green = the chosen start
+              <g>
+                {ports.input && (
+                  <Connector
+                    x={bx - endSize * 0.55}
+                    z={+s.z}
+                    size={endSize}
+                    free={!ports.input.used}
+                    chosen={isStart(ports.input.id)}
+                    label={ports.input.label}
+                    side="left"
+                    font={apFont * 0.85}
+                    stroke={apStroke}
+                    onPick={pick(ports.input.id, "in")}
+                  />
+                )}
+                {endOut && (
+                  <Connector
+                    x={bx + barL + endSize * 0.55}
+                    z={+s.z}
+                    size={endSize}
+                    free={!endOut.cableId}
+                    chosen={isStart(endOut.id)}
+                    label={shortLabel(endOut.label)}
+                    side="right"
+                    font={apFont * 0.85}
+                    stroke={apStroke}
+                    onPick={pick(endOut.id, "out")}
+                  />
+                )}
+                {above.map((port, i) => (
+                  <Connector
+                    key={port.id}
+                    x={sideX(above, i)}
+                    z={by - endSize * 1.4}
+                    size={endSize}
+                    free={!port.cableId}
+                    chosen={isStart(port.id)}
+                    label={shortLabel(port.label)}
+                    side="above"
+                    font={apFont * 0.85}
+                    stroke={apStroke}
+                    onPick={pick(port.id, "out")}
+                  />
+                ))}
+                {below.map((port, i) => (
+                  <Connector
+                    key={port.id}
+                    x={sideX(below, i)}
+                    z={by + barH + endSize * 1.4}
+                    size={endSize}
+                    free={!port.cableId}
+                    chosen={isStart(port.id)}
+                    label={shortLabel(port.label)}
+                    side="below"
+                    font={apFont * 0.85}
+                    stroke={apStroke}
+                    onPick={pick(port.id, "out")}
+                  />
+                ))}
+              </g>
+            )}
+            {ports && !bar && (
               // ends: the input on the left, the outputs on the right; orange = free,
               // grey = used, green = the chosen start. Click an end to connect it.
               <g>
@@ -1381,6 +1606,30 @@ export default function Plan2D({
             </g>
           );
         })()}
+        {highlightWalls.length > 0 && (
+          <g pointerEvents="none" className="wall-highlight">
+            {walls
+              .filter((w) => highlightWalls.includes(w.id))
+              .map((w) => (
+                <g key={`lit-${w.id}`}>
+                  <line x1={w.x1} y1={w.z1} x2={w.x2} y2={w.z2} stroke="#f59e0b" strokeOpacity=".35" strokeLinecap="round" strokeWidth={Math.max(0.5, 16 * mPerPx)} />
+                  <line x1={w.x1} y1={w.z1} x2={w.x2} y2={w.z2} stroke="#e8790a" strokeLinecap="round" strokeWidth={Math.max(0.16, 5 * mPerPx)} />
+                </g>
+              ))}
+          </g>
+        )}
+        {splitTarget && splitCursor && (
+          <g pointerEvents="none">
+            <circle
+              cx={splitCursor.x}
+              cy={splitCursor.z}
+              r={Math.max(0.15, 6 * mPerPx)}
+              fill="#fff"
+              stroke="#e8790a"
+              strokeWidth={Math.max(0.05, 2 * mPerPx)}
+            />
+          </g>
+        )}
       </svg>
     </div>
   );

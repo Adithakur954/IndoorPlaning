@@ -1,10 +1,12 @@
 import { defineConfig } from "vite";
 export default defineConfig({
+  // only the app's own page: build folders (src-tauri/target, build/) hold other HTML files
+  optimizeDeps: { entries: ["index.html"] },
   server: {
     port: 5173,
     // Not frontend code: watching them (huge datasets, venvs, build output) stalls the dev server.
     watch: {
-      ignored: ["**/train/**", "**/worker/**", "**/service/target/**", "**/data/**", "**/outputs/**", "**/.venv/**"],
+      ignored: ["**/train/**", "**/worker/**", "**/src-tauri/**", "**/target/**", "**/build/**", "**/dist/**", "**/data/**", "**/outputs/**", "**/.venv/**"],
     },
     proxy: {
       // Simulation service (Rust); listed first so it wins over "/api".

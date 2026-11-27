@@ -43,8 +43,9 @@ function nodeLossDb(node, nodeId, edge, edgeCount, catalogue) {
   switch (node.type) {
     case "bts":
     case "antenna":
-    case "riser": // a point where the cable changes floor: no loss of its own
       return 0;
+    case "riser": // where the cable changes floor: the riser part's loss, if it has one
+      return catalogue.risers?.[node.partId]?.lossDb ?? 0;
     case "coupler": {
       const coupler = part(catalogue, "couplers", node.partId, nodeId);
       if (edge.port === "tap") return couplerTapLossDb(coupler);
@@ -65,6 +66,10 @@ function nodeLossDb(node, nodeId, edge, edgeCount, catalogue) {
 }
 
 function ratingOf(node, nodeId, catalogue) {
+  if (node.type === "riser") {
+    const watts = catalogue.risers?.[node.partId]?.maxPowerW;
+    return Number.isFinite(watts) ? wattsToDbm(watts) : null;
+  }
   const group = { coupler: "couplers", splitter: "splitters", inline: "inline" }[node.type];
   if (!group) return null;
   const watts = part(catalogue, group, node.partId, nodeId).maxPowerW;

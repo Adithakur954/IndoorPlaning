@@ -1,6 +1,7 @@
 // Turns a plan floor into the inputs the router needs. Uses the same wall model
 // as the 3D view and the ray-tracing export, so doors and walls agree everywhere.
 import { buildWalls } from "../../utils/wallGraph.js";
+import { looseWallOpenings } from "../../utils/wallPieces.js";
 import { bbox, boundaryAreas, inside } from "../../utils/geometry.js";
 import { floorNoGo, floorPowerRoutes, floorTrays, pointInPolygon, resolveWallPolicy, wallKey, withDefaults } from "./pathway.js";
 
@@ -43,8 +44,15 @@ export function floorRoutingInput(plan, floorId, pathway = {}) {
     floorId,
   ).flatMap(solidPieces);
   for (const w of (plan.interiorWalls || []).filter((x) => x.floorId === floorId)) {
-    if ([w.x1, w.z1, w.x2, w.z2].every(Number.isFinite))
-      walls.push({ a: { x: +w.x1, z: +w.z1 }, b: { x: +w.x2, z: +w.z2 }, owners: [] });
+    if ([w.x1, w.z1, w.x2, w.z2].map(Number).every(Number.isFinite))
+      walls.push(
+        ...solidPieces({
+          a: { x: +w.x1, z: +w.z1 },
+          b: { x: +w.x2, z: +w.z2 },
+          openings: looseWallOpenings(w, plan.doors, plan.windows),
+          owners: [],
+        }),
+      );
   }
   for (const wall of walls) {
     wall.key = wallKey(floorId, wall.a, wall.b);

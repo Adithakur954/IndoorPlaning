@@ -18,7 +18,12 @@ const NUMBERS: &[(&str, &str, f64, f64)] = &[
     ("resolutionM", "resolution_m", 0.25, 5.0),
     ("screeningResolutionM", "screening_resolution_m", 0.5, 10.0),
     ("samplesPerTx", "samples_per_tx", 10_000.0, 100_000_000.0),
-    ("screeningSamples", "screening_samples", 10_000.0, 100_000_000.0),
+    (
+        "screeningSamples",
+        "screening_samples",
+        10_000.0,
+        100_000_000.0,
+    ),
     ("maxDepth", "max_depth", 0.0, 20.0),
     ("screeningDepth", "screening_depth", 0.0, 20.0),
     ("seed", "seed", 0.0, 2147483647.0),
@@ -32,7 +37,11 @@ const NUMBERS: &[(&str, &str, f64, f64)] = &[
 const STRINGS: &[(&str, &str, &[&str])] = &[
     ("device", "device", &["auto", "gpu", "cpu"]),
     ("band", "band", &["2.4", "5", "6"]),
-    ("existingHandling", "existing_handling", &["fixed", "reuse", "ignore"]),
+    (
+        "existingHandling",
+        "existing_handling",
+        &["fixed", "reuse", "ignore"],
+    ),
 ];
 const BOOLS: &[(&str, &str)] = &[
     ("includeCommonArea", "include_common_area"),
@@ -94,7 +103,10 @@ pub fn worker_settings(settings: &Value) -> Result<Map<String, Value>, String> {
         }
         out.insert("floor_ids".into(), v.clone());
     }
-    for (key, name) in [("lockedApIds", "locked_ap_ids"), ("keepApIds", "keep_ap_ids")] {
+    for (key, name) in [
+        ("lockedApIds", "locked_ap_ids"),
+        ("keepApIds", "keep_ap_ids"),
+    ] {
         if let Some(v) = obj.get(key) {
             if !v.as_array().is_some_and(|a| a.iter().all(Value::is_string)) {
                 return Err(format!("{key} must be a list of access point ids"));
@@ -102,7 +114,9 @@ pub fn worker_settings(settings: &Value) -> Result<Map<String, Value>, String> {
             out.insert(name.into(), v.clone());
         }
     }
-    if obj.get("targetCoveragePct").map_or(true, Value::is_null) && obj.get("budget").map_or(true, Value::is_null) {
+    if obj.get("targetCoveragePct").map_or(true, Value::is_null)
+        && obj.get("budget").map_or(true, Value::is_null)
+    {
         return Err("give a target coverage, a budget, or both".into());
     }
     // null means "maximise coverage for the budget"
@@ -115,7 +129,9 @@ pub fn worker_settings(settings: &Value) -> Result<Map<String, Value>, String> {
 pub fn validate_candidates(candidates: &Value) -> Result<(), String> {
     let list = candidates.as_array().ok_or("candidates must be a list")?;
     if list.is_empty() || list.len() > MAX_CANDIDATES {
-        return Err(format!("candidates must hold 1 to {MAX_CANDIDATES} entries"));
+        return Err(format!(
+            "candidates must hold 1 to {MAX_CANDIDATES} entries"
+        ));
     }
     for c in list {
         for key in ["id", "floorId", "x", "z", "heightM"] {
@@ -134,12 +150,19 @@ pub fn validate_candidates(candidates: &Value) -> Result<(), String> {
 
 pub fn validate_profile(profile: &Value) -> Result<(), String> {
     if let Some(width) = profile.get("bandwidthMHz") {
-        if !width.as_f64().is_some_and(|n| n.is_finite() && (1.0..=320.0).contains(&n)) {
+        if !width
+            .as_f64()
+            .is_some_and(|n| n.is_finite() && (1.0..=320.0).contains(&n))
+        {
             return Err("profile.bandwidthMHz must be between 1 and 320".into());
         }
     }
     for key in ["txPowerDbm", "gainDbi", "freqMHz"] {
-        if !profile.get(key).and_then(Value::as_f64).is_some_and(f64::is_finite) {
+        if !profile
+            .get(key)
+            .and_then(Value::as_f64)
+            .is_some_and(f64::is_finite)
+        {
             return Err(format!("profile.{key} is required"));
         }
     }
@@ -184,7 +207,10 @@ mod tests {
         assert_eq!(s["allow_new_aps"], json!(true));
         v["lockedApIds"] = json!([1]);
         assert!(worker_settings(&v).is_err());
-        assert!(worker_settings(&json!({"existingHandling": "reposition", "targetCoveragePct": 95})).is_err());
+        assert!(worker_settings(
+            &json!({"existingHandling": "reposition", "targetCoveragePct": 95})
+        )
+        .is_err());
     }
 
     #[test]
@@ -199,7 +225,10 @@ mod tests {
     fn accepts_noise_and_channel_width_and_rejects_bad_values() {
         let mut settings = ok();
         settings["noiseFloor5Dbm"] = json!(-92);
-        assert_eq!(worker_settings(&settings).unwrap()["noise_floor_5_dbm"], json!(-92));
+        assert_eq!(
+            worker_settings(&settings).unwrap()["noise_floor_5_dbm"],
+            json!(-92)
+        );
         settings["noiseFloor5Dbm"] = json!(-120);
         assert!(worker_settings(&settings).is_err());
         let mut profile = json!({"txPowerDbm":20,"gainDbi":4.5,"freqMHz":5180,"bandwidthMHz":40});
@@ -236,8 +265,12 @@ mod tests {
         assert!(validate_candidates(&c).is_ok());
         assert!(validate_candidates(&json!([])).is_err());
         assert!(validate_candidates(&json!([{"id": "a"}])).is_err());
-        assert!(validate_profile(&json!({"txPowerDbm": 20, "gainDbi": 4.5, "freqMHz": 5180})).is_ok());
-        assert!(validate_profile(&json!({"txPowerDbm": 99, "gainDbi": 4.5, "freqMHz": 5180})).is_err());
+        assert!(
+            validate_profile(&json!({"txPowerDbm": 20, "gainDbi": 4.5, "freqMHz": 5180})).is_ok()
+        );
+        assert!(
+            validate_profile(&json!({"txPowerDbm": 99, "gainDbi": 4.5, "freqMHz": 5180})).is_err()
+        );
     }
 
     #[test]
@@ -250,6 +283,10 @@ mod tests {
         s2.insert("threshold_dbm".into(), json!(-70));
         assert_ne!(a, fingerprint("s", &s2, &p, &c, "v1"));
         assert_eq!(a, fingerprint("s", &s, &p, &c, "v1"));
-        assert_ne!(a, fingerprint("s", &s, &p, &c, "v2"), "a new model version is a new result");
+        assert_ne!(
+            a,
+            fingerprint("s", &s, &p, &c, "v2"),
+            "a new model version is a new result"
+        );
     }
 }

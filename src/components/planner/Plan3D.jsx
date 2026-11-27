@@ -1,3 +1,4 @@
+import { looseWallPieces } from "../../utils/wallPieces.js";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import {
@@ -348,14 +349,21 @@ function Draggable({
 // the edge. (Placing polygon openings by the rectangle rule put them inside other walls, where the see-through
 // box fought with the wall's faces and blinked as the view moved.) The box is a centimetre narrower and lower than
 // the gap, so its faces never coincide with the wall pieces around it.
-function Opening({ item, room, type, onSelect }) {
-  if (!room) return null;
+function Opening({ item, room, wall, type, onSelect }) {
+  if (!room && !wall) return null;
   const off = Number(item.offset || 0),
     w = Number(item.width || 1),
     h = Number(item.height || 2);
   const bottom = type === "door" ? 0 : Number(item.sillHeight || 1);
   let x, z, angle;
-  if (room.shape !== "rectangle" && Number.isInteger(item.edgeIndex)) {
+  if (wall) {
+    // on a loose wall, `offset` from its first end
+    const len = Math.hypot(wall.x2 - wall.x1, wall.z2 - wall.z1) || 1;
+    const t = Math.min(len, off + w / 2);
+    x = +wall.x1 + ((wall.x2 - wall.x1) * t) / len;
+    z = +wall.z1 + ((wall.z2 - wall.z1) * t) / len;
+    angle = -Math.atan2(wall.z2 - wall.z1, wall.x2 - wall.x1);
+  } else if (room.shape !== "rectangle" && Number.isInteger(item.edgeIndex)) {
     const pts = pointsOf(room);
     const a = pts[item.edgeIndex % pts.length],
       b = pts[(item.edgeIndex + 1) % pts.length];
@@ -557,6 +565,7 @@ function Scene({
             key={d.id}
             item={d}
             room={rooms.find((r) => r.id === d.roomId)}
+            wall={d.wallId ? walls.find((w) => w.id === d.wallId) : null}
             type="door"
             onSelect={onSelect}
           />
@@ -568,25 +577,39 @@ function Scene({
             key={w.id}
             item={w}
             room={rooms.find((r) => r.id === w.roomId)}
+            wall={w.wallId ? walls.find((x) => x.id === w.wallId) : null}
             type="window"
             onSelect={onSelect}
           />
         ))}
       {walls.map((w) => {
-        const len = Math.hypot(w.x2 - w.x1, w.z2 - w.z1);
+        // solid pieces around the wall's own doors and windows
+        const { length: len, pieces } = looseWallPieces(w, plan.doors, plan.windows);
+        const ux = len ? (w.x2 - w.x1) / len : 0,
+          uz = len ? (w.z2 - w.z1) / len : 0;
         return (
-          <mesh
+          <group
             key={w.id}
-            position={[(+w.x1 + +w.x2) / 2, 1.5, (+w.z1 + +w.z2) / 2]}
-            rotation={[0, -Math.atan2(w.z2 - w.z1, w.x2 - w.x1), 0]}
+            rotation={[0, 0, 0]}
             onClick={(e) => {
               e.stopPropagation();
               onSelect({ type: "wall", id: w.id });
             }}
           >
-            <boxGeometry args={[len, 3, 0.1]} />
-            <meshStandardMaterial color="#6f8584" transparent opacity={0.65} />
-          </mesh>
+            {pieces.map((piece) => {
+              const mid = (piece.from + piece.to) / 2;
+              return (
+                <mesh
+                  key={piece.key}
+                  position={[+w.x1 + ux * mid, (piece.bottom + piece.top) / 2, +w.z1 + uz * mid]}
+                  rotation={[0, -Math.atan2(w.z2 - w.z1, w.x2 - w.x1), 0]}
+                >
+                  <boxGeometry args={[piece.to - piece.from, piece.top - piece.bottom, 0.1]} />
+                  <meshStandardMaterial color="#6f8584" transparent opacity={0.65} />
+                </mesh>
+              );
+            })}
+          </group>
         );
       })}
       {shown("walls") && (

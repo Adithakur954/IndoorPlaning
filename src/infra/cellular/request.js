@@ -59,9 +59,8 @@ export function buildCellularRequest(plan, carrierId, { floorIds } = {}) {
     const model = models[a.antennaModelId];
     const key = `${a.antennaModelId}@${carrier.freqMHz}`;
     if (!patterns[key]) patterns[key] = { ...patternFor(model, carrier.freqMHz), model: model.name || model.id };
+    // an antenna taller than its room sits just under the ceiling (no note: it listed every antenna)
     const h = mountingHeight(plan, a);
-    if (h < (Number(a.heightM) || 0) - 1e-6)
-      notes.push(`${a.name} is placed ${CEILING_CLEARANCE_M * 100} cm under its room's ceiling (${round(h, 2)} m).`);
     return {
       id: a.id,
       name: a.name,

@@ -291,12 +291,26 @@ fn main() {
         }));
     }
     let result = builder.setup(move |app| {
-            let payload = app.path().resource_dir()?.join("payload");
             let data = if ui_smoke {
                 PathBuf::from(std::env::var("INDOOR_SMOKE_DATA_DIR")?)
             } else { app.path().app_local_data_dir()? };
-            let (backends, url) = start(&payload, &data)?;
-            app.manage(backends);
+            // `tauri dev`: the window shows the Vite dev server that
+            // `beforeDevCommand` (npm run dev) started with the API, so edits
+            // appear instantly. Built apps start the packaged payload.
+            let live = tauri::is_dev() && !ui_smoke;
+            let url = if live {
+                app.config()
+                    .build
+                    .dev_url
+                    .as_ref()
+                    .ok_or("devUrl is missing in tauri.conf.json")?
+                    .to_string()
+            } else {
+                let payload = app.path().resource_dir()?.join("payload");
+                let (backends, url) = start(&payload, &data)?;
+                app.manage(backends);
+                url
+            };
             let target: reqwest::Url = url.parse()?;
             let origin = target.origin();
             let handle = app.handle().clone();
@@ -323,7 +337,7 @@ fn main() {
                 .title("Indoor Planner")
                 .inner_size(1440.0, 940.0)
                 .min_inner_size(1000.0, 700.0)
-                .devtools(false)
+                .devtools(live)
                 .visible(!ui_smoke)
                 .data_directory(subprocess_path(&data).join("webview"))
                 .initialization_script(probe)
@@ -374,7 +388,9 @@ fn main() {
                 })
                 .build();
             if let Err(error) = window {
-                app.state::<Backends>().stop();
+                if let Some(backends) = app.try_state::<Backends>() {
+                    backends.stop();
+                }
                 return Err(error.into());
             }
             Ok(())

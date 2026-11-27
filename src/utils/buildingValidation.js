@@ -64,6 +64,26 @@ export function validateBuilding(plan, floorId) {
   const seen = new Map();
   for (const [kind, list] of [["door", doors], ["window", windows]])
     for (const item of list) {
+      if (item.wallId) {
+        // on a loose wall: it must exist and the opening must fit on it
+        const w = plan.interiorWalls.find((x) => x.id === item.wallId);
+        if (!w) {
+          errors.push(`A ${kind} belongs to a wall that no longer exists.`);
+          continue;
+        }
+        const length = Math.hypot(w.x2 - w.x1, w.z2 - w.z1);
+        const start = Number(item.offset || 0),
+          width = Number(item.width || 0);
+        if (start < -0.01 || start + width > length + 0.01)
+          errors.push(`A ${kind} on ${w.name || "a wall"} runs past the end of the wall.`);
+        const key = `wall|${w.id}`;
+        const others = seen.get(key) || [];
+        for (const o of others)
+          if (start < o.start + o.width && o.start < start + width)
+            errors.push(`Two openings overlap on ${w.name || "a wall"}.`);
+        seen.set(key, [...others, { start, width }]);
+        continue;
+      }
       const room = rooms.find((r) => r.id === item.roomId);
       if (!room) {
         errors.push(`A ${kind} belongs to a room that no longer exists.`);

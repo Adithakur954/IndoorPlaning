@@ -10,6 +10,33 @@ const label = (band, unit) =>
       ? `≥ ${band.min} ${unit}`
       : `${band.min} to ${band.max} ${unit}`;
 
+// Vertical colour bar of the smooth map, highest value on top, with a tick and
+// "> edge (share above it)" at every band edge, as the design tool's legend.
+function GradientBar({ ranges, share }) {
+  const stops = ranges
+    .filter((b) => Number.isFinite(b.min))
+    .map((b) => ({ value: b.min, color: b.color }))
+    .sort((a, b) => a.value - b.value);
+  if (stops.length < 2) return null;
+  const lo = stops[0].value,
+    hi = stops[stops.length - 1].value;
+  const at = (v) => (100 * (v - lo)) / (hi - lo || 1);
+  const gradient = `linear-gradient(to top, ${stops.map((s) => `${s.color} ${at(s.value).toFixed(2)}%`).join(", ")})`;
+  return (
+    <div className="map-legend-gradient">
+      <div className="map-legend-gradient-bar" style={{ background: gradient }} />
+      <div className="map-legend-gradient-ticks">
+        {stops.map((s) => (
+          <span key={s.value} style={{ bottom: `${at(s.value)}%` }}>
+            &gt;{s.value.toFixed(2)}
+            {share(s.value)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function CellularLegend({ cellular, floorId }) {
   const [open, setOpen] = useState(true);
   if (!cellular?.hasResult || !cellular.show) return null;
@@ -18,7 +45,9 @@ export default function CellularLegend({ cellular, floorId }) {
   // as the design legend: the share of the floor at or above each band, and the average
   const values = floorId ? cellular.cellsFor(floorId).map((c) => c.dbm) : [];
   const share = (min) =>
-    values.length && Number.isFinite(min) ? ` (${((100 * values.filter((v) => v >= min).length) / values.length).toFixed(1)} %)` : "";
+    values.length && Number.isFinite(min) ? ` (${((100 * values.filter((v) => v >= min).length) / values.length).toFixed(1)}%)` : "";
+  // Bar (smooth) or Ranges: chosen in Settings
+  const smooth = cellular.mapStyle !== "bands";
   // mean of the values in dBm (dB), as the design tool's legend gives it
   const average = values.length ? values.reduce((a, v) => a + v, 0) / values.length : null;
   return (
@@ -45,13 +74,18 @@ export default function CellularLegend({ cellular, floorId }) {
                 {carrierLabel(carrier)}
               </small>
             )}
-            {[...cellular.ranges].reverse().map((band, i) => (
-              <div key={`${band.color}-${i}`} className="map-legend-row">
-                <i style={{ background: band.color }} />
-                {label(band, unit)}
-                {share(band.min)}
-              </div>
-            ))}
+            <small className="hint">{cellular.metric === "sinr" ? "SINR" : "RSRP"} (best path) [{unit}]</small>
+            {smooth ? (
+              <GradientBar ranges={cellular.ranges} share={share} />
+            ) : (
+              [...cellular.ranges].reverse().map((band, i) => (
+                <div key={`${band.color}-${i}`} className="map-legend-row">
+                  <i style={{ background: band.color }} />
+                  {label(band, unit)}
+                  {share(band.min)}
+                </div>
+              ))
+            )}
             {average !== null && (
               <small className="hint">
                 Average: {average.toFixed(2)} {unit}

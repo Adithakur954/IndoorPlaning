@@ -50,13 +50,6 @@ import AlignmentPanel from "../components/panels/AlignmentPanel.jsx";
 import CablingPanel from "../components/panels/CablingPanel.jsx";
 import useCableOverlay from "../hooks/useCableOverlay.js";
 import CapacityPanel from "../components/panels/CapacityPanel.jsx";
-import EditorMenu, {
-  EditorQuickTools,
-  PredictionMenu,
-  DownloadImageButton,
-  LegendMenu,
-  ShowMenu,
-} from "../components/planner/EditorMenu.jsx";
 import { useRayTracedPrediction } from "../hooks/useRayTracedPrediction.js";
 import { useApOptimization } from "../hooks/useApOptimization.js";
 import { plotFileName, plotImageBlob } from "../utils/plotImage.js";
@@ -69,7 +62,16 @@ import {
 } from "../services/simulation.js";
 import { COMPARED_BANDS, planForBand } from "../utils/bandVariants.js";
 import { mergeSharedWall, snapCollidingWalls } from "../utils/wallMerge.js";
-import { roomOutlineFromWalls } from "../utils/wallRoom.js";
+import {
+  distanceAlongWall,
+  mergeTwoWalls,
+  openingsAfterBreak,
+  openingsOntoRoom,
+  openingsOntoWalls,
+  roomOutlineFromWalls,
+  splitWall,
+  wallsFromRoom,
+} from "../utils/wallRoom.js";
 import {
   defaultKpiFor,
   kpisForKind,
@@ -91,6 +93,7 @@ import {
   withoutLooseCables,
 } from "../infra/cellular/das.js";
 import { WORKSPACES, useWorkspace, workspaceOf } from "../workspace.js";
+import Ribbon from "../components/planner/Ribbon.jsx";
 import WorkspaceFooter from "../components/planner/WorkspaceFooter.jsx";
 import { MeasurementUnitProvider } from "../utils/measurementUnits.jsx";
 
@@ -192,7 +195,7 @@ export default function PlannerPage() {
   const [cablePick, setCablePick] = useState(null);
   const [cableStartPort, setCableStartPort] = useState(null); // { id, port, dir: "in" | "out" }
   // types chosen in the DAS tool bar for the next part or cable placed
-  const [dasOptions, setDasOptions] = useState({ splitter: "s2", coupler: "c10", combiner: "cm21", cable: "auto" });
+  const [dasOptions, setDasOptions] = useState({ splitter: "s2", coupler: "c10", combiner: "cm21", riser: "riser", cable: "auto", cableConnectors: 2, cableExtraM: 0 });
   const [projectName, setProjectName] = useState(""),
     [view, setView] = useState("2d"),
     [tool, setTool] = useState("select"),
@@ -818,6 +821,11 @@ export default function PlannerPage() {
     const list = listKey[selected.type];
     mutate((p) => {
       const next = { ...p, [list]: p[list].filter((x) => x.id !== id) };
+      // a removed wall takes its doors and windows with it
+      if (selected.type === "wall") {
+        next.doors = p.doors.filter((d) => d.wallId !== id);
+        next.windows = p.windows.filter((w) => w.wallId !== id);
+      }
       // a removed DAS part or antenna takes its cables with it
       if (selected.type === "source" && p.cellular?.cables?.some((c) => c.from === id || c.to === id))
         next.cellular = { ...p.cellular, cables: p.cellular.cables.filter((c) => c.from !== id && c.to !== id) };
@@ -968,10 +976,35 @@ export default function PlannerPage() {
     addCable(from.id, to.id, startIsOut ? cablePoints : [...cablePoints].reverse(), from.port);
     setCableStartPort(null);
   };
+  // reshape a drawn cable: add a bend in the middle of a piece, move a bend, or take one out
+  const bendCable = (cableId, action, index, at) =>
+    mutate((p) => {
+      const cur = cellularOf(p);
+      return {
+        ...p,
+        cellular: {
+          ...(p.cellular || {}),
+          ...cur,
+          cables: cur.cables.map((c) => {
+            if (c.id !== cableId) return c;
+            const points = [...(c.points || [])];
+            if (action === "insert") points.splice(index, 0, { floorId, x: at.x, z: at.z });
+            else if (action === "move" && points[index]) points[index] = { ...points[index], x: at.x, z: at.z };
+            else if (action === "remove") points.splice(index, 1);
+            return { ...c, points };
+          }),
+        },
+      };
+    });
   // adds the cable being drawn (port: the chosen output of its start part)
   const addCable = (from, to, points, port) => {
     const name = (id) => plan.sources.find((s) => s.id === id)?.name || "part";
-    const c = newCable(plan, from, to, uid(), { cableId: dasOptions.cable, points, port });
+    const c = {
+      ...newCable(plan, from, to, uid(), { cableId: dasOptions.cable, points, port }),
+      // chosen in the Cable pop-up
+      connectors: dasOptions.cableConnectors ?? 2,
+      extraM: dasOptions.cableExtraM ?? 0,
+    };
     mutate((old) => {
       const cur = cellularOf(old);
       return { ...old, cellular: { ...(old.cellular || {}), ...cur, cables: [...cur.cables, c] } };
@@ -1106,6 +1139,39 @@ export default function PlannerPage() {
               Math.max(0.5, Number(plan.wallThickness) + 0.3),
             )
           : null;
+      // not on a room side: the nearest loose wall within reach takes it
+      if (!wallPlacement) {
+        const reach = Math.max(0.5, Number(plan.wallThickness) + 0.3);
+        const near = plan.interiorWalls
+          .filter((w) => w.floorId === floorId)
+          .map((w) => {
+            const along = distanceAlongWall(w, p),
+              length = Math.hypot(w.x2 - w.x1, w.z2 - w.z1),
+              t = length ? along / length : 0;
+            const gap = Math.hypot(
+              p.x - (+w.x1 + (w.x2 - w.x1) * t),
+              p.z - (+w.z1 + (w.z2 - w.z1) * t),
+            );
+            return { w, along, length, gap };
+          })
+          .filter((c) => c.gap <= reach && c.length >= openingWidth)
+          .sort((a, b) => a.gap - b.gap)[0];
+        if (near) {
+          const o = {
+            id: uid(),
+            floorId,
+            wallId: near.w.id,
+            offset: Math.max(0, Math.min(near.length - openingWidth, near.along - openingWidth / 2)),
+            width: openingWidth,
+            height: kind === "door" ? 2.1 : 1.2,
+            ...(kind === "window" ? { sillHeight: 1 } : {}),
+          };
+          const listName = kind === "door" ? "doors" : "windows";
+          mutate((old) => ({ ...old, [listName]: [...old[listName], o] }));
+          setSelected({ type: kind, id: o.id });
+          return;
+        }
+      }
       if (kind === "door" && !wallPlacement) {
         setMessage(
           rooms.length ? "Place the door on a room wall." : "Add a room first.",
@@ -1240,6 +1306,20 @@ export default function PlannerPage() {
                     z1: +x.z1 + dz,
                     z2: +x.z2 + dz,
                   }
+                : (type === "door" || type === "window") && x.wallId
+                  ? {
+                      ...x,
+                      offset: (() => {
+                        const w = p.interiorWalls.find((item) => item.id === x.wallId);
+                        if (!w) return x.offset;
+                        const length = Math.hypot(w.x2 - w.x1, w.z2 - w.z1) || 1;
+                        const along = (dx * (w.x2 - w.x1) + dz * (w.z2 - w.z1)) / length;
+                        return Math.max(
+                          0,
+                          Math.min(length - Number(x.width || 0), num(x.offset) + along),
+                        );
+                      })(),
+                    }
                 : type === "door" || type === "window"
                   ? {
                       ...x,
@@ -1613,6 +1693,9 @@ export default function PlannerPage() {
       ...p,
       interiorWalls: p.interiorWalls.filter((w) => !gone.has(w.id)),
       rooms: [...p.rooms, room],
+      // doors and windows on those walls move onto the room's sides
+      doors: openingsOntoRoom(room, used, p.doors),
+      windows: openingsOntoRoom(room, used, p.windows),
     }));
     selectEntity({ type: "room", id: room.id });
     setMessage(
@@ -1620,6 +1703,77 @@ export default function PlannerPage() {
         ? `${room.name} made from ${used.length} walls.`
         : `${room.name} made from ${used.length} walls; the open side was closed with a straight wall.`,
     );
+  };
+  // Breaks one interior wall into two walls at `at` metres from its first end.
+  // Both keep the wall's material, height and name; the first stays selected.
+  const breakWall = (wallId, at) => {
+    const wall = plan.interiorWalls.find((w) => w.id === wallId);
+    if (!wall) return;
+    const pieces = splitWall(wall, at, uid());
+    if (pieces.error) {
+      setMessage(pieces.error);
+      return;
+    }
+    const doors = openingsAfterBreak(plan.doors, wallId, pieces[1].id, at),
+      windows = openingsAfterBreak(plan.windows, wallId, pieces[1].id, at);
+    if (doors.error || windows.error) {
+      setMessage(doors.error || windows.error);
+      return;
+    }
+    mutate((p) => ({
+      ...p,
+      interiorWalls: p.interiorWalls.flatMap((w) => (w.id === wallId ? pieces : [w])),
+      doors: openingsAfterBreak(p.doors, wallId, pieces[1].id, at).items,
+      windows: openingsAfterBreak(p.windows, wallId, pieces[1].id, at).items,
+    }));
+    selectEntity({ type: "wall", id: pieces[0].id });
+    setMessage("Wall broken into two walls.");
+  };
+  // Two loose walls in one line become one wall (the first keeps its id, name
+  // and material); doors and windows of both stay where they are.
+  const mergeWalls = (keepId, otherId) => {
+    const a = plan.interiorWalls.find((w) => w.id === keepId),
+      b = plan.interiorWalls.find((w) => w.id === otherId);
+    if (!a || !b) return;
+    mutate((p) => {
+      const doors = mergeTwoWalls(a, b, p.doors),
+        windows = mergeTwoWalls(a, b, p.windows);
+      return {
+        ...p,
+        interiorWalls: p.interiorWalls
+          .filter((w) => w.id !== otherId)
+          .map((w) => (w.id === keepId ? doors.wall : w)),
+        doors: doors.items,
+        windows: windows.items,
+      };
+    });
+    selectEntity({ type: "wall", id: keepId });
+    setMessage(`${a.name || "Wall"} and ${b.name || "wall"} merged into one wall.`);
+  };
+  // Turns a room into loose walls, one per side (a rectangle gives four), so
+  // each wall can be moved, broken or deleted on its own. Each wall keeps its
+  // side's material and the room height.
+  const splitRoomIntoWalls = (roomId) => {
+    const room = plan.rooms.find((r) => r.id === roomId);
+    if (!room) return;
+    const walls = wallsFromRoom(room, plan.wallTypes || {}, uid);
+    if (walls.error) {
+      setMessage(walls.error);
+      return;
+    }
+    mutate((p) => ({
+      ...p,
+      rooms: p.rooms.filter((r) => r.id !== roomId),
+      interiorWalls: [...p.interiorWalls, ...walls],
+      // doors and windows stay where they are, now on the new walls
+      doors: openingsOntoWalls(room, walls, p.doors),
+      windows: openingsOntoWalls(room, walls, p.windows),
+      wallTypes: Object.fromEntries(
+        Object.entries(p.wallTypes || {}).filter(([key]) => !key.startsWith(`${roomId}:`)),
+      ),
+    }));
+    selectEntity({ type: "wall", id: walls[0].id });
+    setMessage(`${room.name || "Room"} split into ${walls.length} walls.`);
   };
   // Splits an upright rectangle room into four equal quarter rooms (NW, NE,
   // SW, SE). Outer walls keep their materials, doors and windows move to the
@@ -2042,6 +2196,8 @@ Cancel: ${what} of the optimised design instead.`,
         id: c.id,
         otherFloor,
         runs: drawn,
+        // ends and bends in order (bend j is route[j + 1]), for reshaping the cable
+        route,
         label: c.port === "tap" ? { text: "tap", x: (mid.x + next.x) / 2, z: (mid.z + next.z) / 2 } : null,
       }];
     });
@@ -2125,6 +2281,7 @@ Cancel: ${what} of the optimised design instead.`,
     cablePoints,
     antennaPowers,
     dasPorts,
+    bendCable,
     portInfo,
     dasOptions,
     setDasOptions,
@@ -2243,6 +2400,9 @@ Cancel: ${what} of the optimised design instead.`,
     convertRoomToBoundary,
     splitRoomInFour,
     makeRoomFromWalls,
+    breakWall,
+    mergeWalls,
+    splitRoomIntoWalls,
     convertBoundaryToRoom,
     moveBoundaryTo,
     optimization,
@@ -2488,41 +2648,31 @@ Cancel: ${what} of the optimised design instead.`,
         </aside>
         <div className="workspace-content">
           {tab === "design" && (
-            <header className="topbar editor-header">
-              <EditorQuickTools tool={tool} setTool={setTool} />
-              <EditorMenu
-                active={panelMode === "tools"}
-                onOpen={() => openRightPanel("tools")}
-              />
-              {workspace === "cellular" ? (
-                <button
-                  className="prediction-menu-trigger"
-                  type="button"
-                  aria-pressed={panelMode === "cellular"}
-                  onClick={() => openRightPanel("cellular")}
-                >
-                  Prediction
-                </button>
-              ) : (
-                <PredictionMenu
-                  active={panelMode === "prediction" || panelMode === "optimize"}
-                  onOpen={() =>
-                    openRightPanel(
-                      panelMode === "optimize" ? "optimize" : "prediction",
-                    )
-                  }
-                />
-              )}
-              <ShowMenu
-                workspace={workspace}
-                hiddenLayers={hiddenLayers}
-                onHiddenLayers={setHiddenLayers}
-                logCount={plan.logs.length}
-                onManageLogs={() => {
-                  setSelected(null);
-                  setPanelMode("selection");
-                }}
-                overlays={[
+            <Ribbon
+              workspace={workspace}
+              tool={tool}
+              setTool={setTool}
+              snap={snap}
+              setSnap={setSnap}
+              onUndo={undo}
+              onRedo={redo}
+              canUndo={historySize.past > 0}
+              canRedo={historySize.future > 0}
+              hasSelection={Boolean(selected && obj)}
+              onDelete={deleteObj}
+              panelMode={panelMode}
+              openPanel={openRightPanel}
+              isStatic={plan.property?.static !== false}
+              onStaticChange={setStatic}
+              showMeasurements={showMeasurements}
+              onShowMeasurementsChange={setShowMeasurements}
+              view={view}
+              setView={setView}
+              zoom={zoom}
+              setZoom={setZoom}
+              hiddenLayers={hiddenLayers}
+              setHiddenLayers={setHiddenLayers}
+              overlays={[
                   {
                     id: "heatmap",
                     // cellular: the prediction map (RSRP / SINR), the same switch as Show / Hide map in Prediction
@@ -2574,93 +2724,17 @@ Cancel: ${what} of the optimised design instead.`,
                     defaultOn: false,
                   },
                 ].filter(Boolean)}
-              />
-              <details className="editor-overflow">
-                <summary aria-label="View settings and exports">View &amp; export</summary>
-                <div className="editor-overflow-popover">
-                  <label
-                    className="prediction-opacity"
-                    title="Opacity of the prediction image"
-                  >
-                    <span>Map opacity {Math.round(heatmapOpacity * 100)}%</span>
-                    <input
-                      type="range"
-                      min="10"
-                      max="100"
-                      step="5"
-                      value={Math.round(heatmapOpacity * 100)}
-                      onChange={(e) =>
-                        setHeatmapOpacity(Number(e.target.value) / 100)
-                      }
-                    />
-                  </label>
-                  <LegendMenu
-                    sections={legendSections}
-                    onChange={setLegendSections}
-                  />
-                  <DownloadImageButton onDownload={downloadPlot} busy={imageBusy} />
-                  {/* Wi-Fi reports (per AP, 2.4 vs 5 GHz); the cellular report is its own step */}
-                  {workspace === "wifi" && (<>
-              <button
-                className="download-image-trigger icon-button"
-                type="button"
-                disabled={reportBusy}
-                aria-label="Download Word report"
-                title={
-                  reportBusy
-                    ? "Building report…"
-                    : "Download Word report (.docx): each AP's prediction, the combined prediction, optimised APs and the APs needed for full coverage"
-                }
-                onClick={downloadReport}
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  width="18"
-                  height="18"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
-                  <path d="M14 3v5h5" />
-                  <path d="M9 13h6M9 17h6" />
-                </svg>
-              </button>
-              <button
-                className="download-image-trigger icon-button"
-                type="button"
-                disabled={compareBusy || reportBusy}
-                aria-label="Download 2.4 GHz vs 5 GHz comparison report"
-                title={
-                  compareBusy
-                    ? "Building the comparison report (predicting both bands)…"
-                    : "Download the 2.4 GHz vs 5 GHz comparison report (.docx): the same APs predicted on each band"
-                }
-                onClick={downloadComparison}
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  width="18"
-                  height="18"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
-                  <path d="M14 3v5h5" />
-                  <path d="M9 18v-4M12 18v-7M15 18v-5" />
-                </svg>
-              </button>
-              </>)}
-                </div>
-              </details>
-            </header>
+              heatmapOpacity={heatmapOpacity}
+              setHeatmapOpacity={setHeatmapOpacity}
+              legendSections={legendSections}
+              setLegendSections={setLegendSections}
+              onDownloadImage={downloadPlot}
+              imageBusy={imageBusy}
+              onReport={downloadReport}
+              reportBusy={reportBusy}
+              onCompare={downloadComparison}
+              compareBusy={compareBusy}
+            />
           )}
           <main className={`main ${tab === "design" ? "main-editor" : ""}`}>
             {message && (
@@ -2714,10 +2788,6 @@ Cancel: ${what} of the optimised design instead.`,
         unit={measurementUnit}
         sources={sources.length}
         saveState={saveState}
-        onUndo={undo}
-        onRedo={redo}
-        canUndo={historySize.past > 0}
-        canRedo={historySize.future > 0}
         showMeasurements={showMeasurements}
         onShowMeasurementsChange={setShowMeasurements}
         isStatic={plan.property?.static !== false}

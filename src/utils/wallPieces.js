@@ -64,3 +64,40 @@ export function wallPieces({ length, side, edgeIndex, room, doors, windows }) {
     openings: wallOpenings({ length, side, edgeIndex, room, doors, windows }),
   });
 }
+
+// Openings on a loose (interior) wall: a door or window with `wallId` sits on
+// that wall, `offset` metres from its first end (x1, z1).
+export function looseWallOpenings(wall, doors = [], windows = []) {
+  const length = Math.hypot(Number(wall.x2) - Number(wall.x1), Number(wall.z2) - Number(wall.z1));
+  const height = Number(wall.height) || 3;
+  return [
+    ...doors.map((o) => ({ ...o, kind: "door" })),
+    ...windows.map((o) => ({ ...o, kind: "window" })),
+  ]
+    .filter((o) => o.wallId === wall.id)
+    .map((o) => {
+      const start = Math.max(0, Number(o.offset || 0));
+      const bottom = o.kind === "window" ? Math.max(0, Number(o.sillHeight || 1)) : 0;
+      return {
+        ...o,
+        start,
+        end: Math.min(length, start + Number(o.width || 1)),
+        bottom,
+        top: Math.min(height, bottom + Number(o.height || 2)),
+      };
+    })
+    .filter((o) => o.end > o.start);
+}
+
+// A loose wall as solid pieces around its openings, with its length and height.
+export function looseWallPieces(wall, doors = [], windows = []) {
+  const length = Math.hypot(Number(wall.x2) - Number(wall.x1), Number(wall.z2) - Number(wall.z1));
+  return {
+    length,
+    ...splitWall({
+      length,
+      height: Number(wall.height) || 3,
+      openings: looseWallOpenings(wall, doors, windows),
+    }),
+  };
+}

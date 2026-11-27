@@ -1,7 +1,7 @@
 // Candidate access-point mounting positions on real surfaces (walls and
 // ceilings) of one floor, with the reason for every rejected position.
 import { bbox, boundaryAreas, inside, pointsOf } from "./geometry.js";
-import { wallOpenings } from "./wallPieces.js";
+import { wallOpenings, looseWallOpenings } from "./wallPieces.js";
 
 export const DEFAULT_CANDIDATE_OPTIONS = {
   mounting: ["wall"], // "wall" and/or "ceiling"
@@ -148,6 +148,17 @@ export function generateCandidates(plan, floorId, userOptions = {}) {
         openingSegments.push({ a: at(op.start), b: at(op.end) });
       }
     });
+  }
+  for (const w of plan.interiorWalls.filter((x) => x.floorId === floorId)) {
+    const length = Math.hypot(w.x2 - w.x1, w.z2 - w.z1);
+    if (length < 0.015) continue;
+    for (const op of looseWallOpenings(w, doors, windows)) {
+      const at = (d) => ({
+        x: +w.x1 + ((w.x2 - w.x1) * d) / length,
+        z: +w.z1 + ((w.z2 - w.z1) * d) / length,
+      });
+      openingSegments.push({ a: at(op.start), b: at(op.end) });
+    }
   }
 
   const roomOk = (room) => room?.apMounting !== "excluded";
