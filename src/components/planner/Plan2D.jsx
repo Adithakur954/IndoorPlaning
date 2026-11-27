@@ -25,6 +25,8 @@ const shortApName = (name) =>
 
 
 
+const DAS_PLACING_TOOLS = ["dassource", "splitter", "coupler", "combiner", "riser"];
+
 // the type shown after a DAS part's name: "2-way", "10 dB", "2x1"
 const dasTypeLabel = (s) =>
   s.dasType === "splitter"
@@ -261,6 +263,12 @@ export default function Plan2D({
     // the Cable tool joins the part or antenna clicked first to the one clicked next
     if (tool === "dascable" && type === "source") {
       onPlace("dascable", { id });
+      return;
+    }
+    // with a DAS placing tool, a click on an existing part or antenna selects it
+    // (its properties open) instead of placing a new part on top of it
+    if (DAS_PLACING_TOOLS.includes(tool) && type === "source") {
+      onSelect(entity(type, id));
       return;
     }
     if (tool !== "select") {
@@ -562,7 +570,8 @@ export default function Plan2D({
       if (s.kind !== "wifi" || showWifiNames)
         items.push({
           id: `s:${s.id}`,
-          text: shortApName(s.name),
+          // the label as drawn: a DAS part also shows its type ("SP1 · 3-way")
+          text: shortApName(s.name) + (s.kind === "das" && dasTypeLabel(s) ? ` · ${dasTypeLabel(s)}` : ""),
           fontSize: apFont,
           priority: 2,
           preferred: null,

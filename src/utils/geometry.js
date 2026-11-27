@@ -226,8 +226,22 @@ export function shiftRoomContents(plan, room, dx, dz) {
     s = ids(c.sources),
     w = ids(c.walls),
     r = ids(c.rooms);
+  // DAS cable bends between parts that move with the room move too
+  const cables = plan.cellular?.cables;
+  const cellular =
+    Array.isArray(cables) && cables.some((x) => x.points?.length && s.has(x.from) && s.has(x.to))
+      ? {
+          ...plan.cellular,
+          cables: cables.map((x) =>
+            x.points?.length && s.has(x.from) && s.has(x.to)
+              ? { ...x, points: x.points.map((p) => ({ ...p, x: +p.x + dx, z: +p.z + dz })) }
+              : x,
+          ),
+        }
+      : plan.cellular;
   return {
     ...plan,
+    ...(cellular ? { cellular } : {}),
     furniture: plan.furniture.map((x) =>
       f.has(x.id) ? { ...x, x: +x.x + dx, z: +x.z + dz } : x,
     ),

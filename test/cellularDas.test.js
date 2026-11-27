@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { initialPlan } from "../src/models/plan.js";
 import { buildSceneFiles } from "../src/utils/sceneExport.js";
-import { cableLengthM, cableLossAt, cableProblem, dasPowers, newCable, newDasPart, partOutputs } from "../src/infra/cellular/das.js";
+import { cableLengthM, cableLossAt, cableProblem, dasPowers, newCable, newDasPart, partOutputs, withoutLooseCables } from "../src/infra/cellular/das.js";
+import { rotateParts } from "../src/utils/rotate.js";
+import { shiftRoomContents } from "../src/utils/geometry.js";
 import { buildCellularRequest } from "../src/infra/cellular/request.js";
 import { BAND_PRESETS, presetCarrierFields } from "../src/infra/cellular/bands.js";
 import { DEFAULT_CATALOGUE } from "../src/infra/cellular/engine/catalogue.js";
@@ -101,6 +103,22 @@ test("parts get the type chosen when placed; cables the chosen type, bends and j
   near(cableLengthM(plan, bent), 5 + 25);
   near(cableLengthM(plan, { ...bent, cableId: "jumper" }), 1);
   assert.deepEqual(partOutputs(plan, plan.sources.find((s) => s.id === "sp")), { total: 2, used: 2 });
+});
+
+test("rotating or moving the building moves cable bends; removed parts take their cables", () => {
+  let plan = dasPlan();
+  plan = { ...plan, cellular: { ...plan.cellular, cables: [...plan.cellular.cables, newCable(plan, "sp", "a3", "c9", { points: [{ floorId: "f0", x: 25, z: 10 }] })] } };
+  // turn 90 degrees about the source: the bend turns with the ends, the length stays
+  const before = cableLengthM(plan, plan.cellular.cables[3]);
+  const turned = rotateParts(plan, { sources: plan.sources.map((s) => s.id) }, { x: 0, z: 10 }, 90);
+  near(cableLengthM(turned, turned.cellular.cables[3]), before, 1e-3);
+  assert.notDeepEqual(turned.cellular.cables[3].points, plan.cellular.cables[3].points);
+  // the hall moves 2 m with its contents: the bend moves 2 m
+  const moved = shiftRoomContents(plan, plan.rooms[0], 2, 0);
+  assert.equal(moved.cellular.cables[3].points[0].x, 27);
+  // a deleted part leaves no cable behind
+  const gone = withoutLooseCables({ ...plan, sources: plan.sources.filter((s) => s.id !== "sp") });
+  assert.deepEqual(gone.cellular.cables.map((c) => c.id), []);
 });
 
 test("a cable that would break the tree is refused", () => {

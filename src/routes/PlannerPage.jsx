@@ -77,7 +77,16 @@ import {
 import { DEFAULT_LEGEND_SECTIONS } from "../components/planner/MapLegend.jsx";
 import { useCellularPrediction } from "../hooks/useCellularPrediction.js";
 import { cellularOf, newAntennaFields } from "../infra/cellular/model.js";
-import { DAS_TYPES, cableProblem, cableRoute, dasPowers, newCable, newDasPart, partOutputs } from "../infra/cellular/das.js";
+import {
+  DAS_TYPES,
+  cableProblem,
+  cableRoute,
+  dasPowers,
+  newCable,
+  newDasPart,
+  partOutputs,
+  withoutLooseCables,
+} from "../infra/cellular/das.js";
 import { WORKSPACES, useWorkspace, workspaceOf } from "../workspace.js";
 import WorkspaceFooter from "../components/planner/WorkspaceFooter.jsx";
 import { MeasurementUnitProvider } from "../utils/measurementUnits.jsx";
@@ -844,7 +853,7 @@ export default function PlannerPage() {
         "logs",
       ])
         next[key] = p[key].filter((x) => x.floorId !== floorId);
-      return next;
+      return withoutLooseCables(next);
     });
     setSelected(null);
     setPanelMode("selection");
@@ -880,7 +889,7 @@ export default function PlannerPage() {
           ([k]) => !gone.has(k.split(":")[0]),
         ),
       );
-      return next;
+      return withoutLooseCables(next);
     });
     setSelected(null);
     setPanelMode("selection");
@@ -946,7 +955,9 @@ export default function PlannerPage() {
     if (dasType && DAS_TYPES[dasType]) {
       const s = newDasPart(plan, dasType, floorId, p, uid(), { partId: dasOptions[dasType] });
       mutate((old) => ({ ...old, sources: [...old.sources, s] }));
+      // the tool stays on (place more until Cursor is chosen); the new part is selected to change its type
       selectEntity({ type: "source", id: s.id });
+      return;
     }
     if (kind === "dascable") {
       const name = (id) => plan.sources.find((s) => s.id === id)?.name || "part";

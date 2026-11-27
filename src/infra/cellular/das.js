@@ -217,3 +217,28 @@ export function partOutputs(plan, part) {
           : 1;
   return { total, used };
 }
+
+// The plan without DAS cables whose start or end no longer exists (a deleted
+// floor, part or antenna takes its cables with it).
+export function withoutLooseCables(plan) {
+  const cables = plan.cellular?.cables;
+  if (!Array.isArray(cables) || !cables.length) return plan;
+  const ids = new Set((plan.sources || []).map((s) => s.id));
+  const kept = cables.filter((c) => ids.has(c.from) && ids.has(c.to));
+  return kept.length === cables.length ? plan : { ...plan, cellular: { ...plan.cellular, cables: kept } };
+}
+
+// The plan with the bends of every cable whose both ends are in `moved` changed by fn(point).
+export function moveCableBends(plan, moved, fn) {
+  const cables = plan.cellular?.cables;
+  if (!Array.isArray(cables) || !cables.some((c) => c.points?.length && moved.has(c.from) && moved.has(c.to))) return plan;
+  return {
+    ...plan,
+    cellular: {
+      ...plan.cellular,
+      cables: cables.map((c) =>
+        c.points?.length && moved.has(c.from) && moved.has(c.to) ? { ...c, points: c.points.map((p) => ({ ...p, ...fn(p) })) } : c,
+      ),
+    },
+  };
+}

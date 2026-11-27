@@ -6,6 +6,7 @@
 // other angle turns a rectangle into a polygon, which has no sides, so its
 // doors, windows and side materials are dropped (see `rotationLosesData`).
 import { bbox, pointsOf, roomContents } from "./geometry.js";
+import { moveCableBends } from "../infra/cellular/das.js";
 
 const RAD = Math.PI / 180;
 const SIDES = ["north", "east", "south", "west"];
@@ -106,14 +107,16 @@ function turnWallTypes(wallTypes, roomId, k) {
 
 // Rotates the listed objects of `plan` about `pivot`.
 export function rotateParts(
-  plan,
+  planIn,
   { rooms = [], furniture = [], sources = [], walls = [], boundaries = [] },
   pivot,
   deg,
 ) {
+  const sourceIds = new Set(sources);
+  // DAS cable bends turn with the parts they join
+  const plan = moveCableBends(planIn, sourceIds, (p) => roundPoint(rotatePoint({ x: +p.x, z: +p.z }, pivot, deg)));
   const roomIds = new Set(rooms),
     furnitureIds = new Set(furniture),
-    sourceIds = new Set(sources),
     wallIds = new Set(walls),
     boundaryIds = new Set(boundaries);
   const k = quarterTurns(deg);
