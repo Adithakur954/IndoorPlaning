@@ -16,12 +16,13 @@ const toolLabels = {
   dassource: "Source (BTS)",
   splitter: "Splitter",
   coupler: "Coupler",
+  combiner: "Combiner",
   riser: "Riser",
   dascable: "Cable",
   wifi: "Wi-Fi AP",
 };
 // tools of one network only: a Wi-Fi project places APs, a cellular one antennas and the DAS
-const CELLULAR_TOOLS = ["cellular", "dassource", "splitter", "coupler", "riser", "dascable"];
+const CELLULAR_TOOLS = ["cellular", "dassource", "splitter", "coupler", "combiner", "riser", "dascable"];
 
 export default function EditorMenu({ active, onOpen }) {
   return (

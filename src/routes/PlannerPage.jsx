@@ -939,7 +939,7 @@ export default function PlannerPage() {
       selectEntity({ type: "boundary", id: boundary.id });
       setTool("select");
     }
-    const dasType = { dassource: "source", splitter: "splitter", coupler: "coupler", riser: "riser" }[kind];
+    const dasType = { dassource: "source", splitter: "splitter", coupler: "coupler", combiner: "combiner", riser: "riser" }[kind];
     if (dasType && DAS_TYPES[dasType]) {
       const s = newDasPart(plan, dasType, floorId, p, uid());
       mutate((old) => ({ ...old, sources: [...old.sources, s] }));

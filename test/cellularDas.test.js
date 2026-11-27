@@ -81,6 +81,17 @@ test("cables between floors add the floor height; extra length is added", () => 
   assert.ok(cableLossAt(plan, { from: "src", to: "r1", cableId: "7/8", connectors: 2 }, 3500).totalDb > 0);
 });
 
+test("a riser cable defaults to the 7/8 feeder; a combiner adds its datasheet loss", () => {
+  let plan = dasPlan();
+  const riser = newDasPart(plan, "riser", "f1", { x: 0, z: 10 }, "r1");
+  const comb = newDasPart(plan, "combiner", "f0", { x: 2, z: 10 }, "cb");
+  plan = { ...plan, sources: [...plan.sources, riser, comb] };
+  assert.equal(newCable(plan, "src", "r1", "x").cableId, "7/8");
+  assert.equal(newCable(plan, "sp", "a1", "y").cableId, "1/2");
+  assert.equal(comb.partId, "cm21");
+  assert.equal(DEFAULT_CATALOGUE.inline.cm21.lossDb, 3.8);
+});
+
 test("a cable that would break the tree is refused", () => {
   const plan = dasPlan();
   assert.match(cableProblem(plan, "a1", "sp"), /is an antenna/);

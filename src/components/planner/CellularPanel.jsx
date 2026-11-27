@@ -263,6 +263,7 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
             ["dassource", "Source"],
             ["splitter", "Splitter"],
             ["coupler", "Coupler"],
+            ["combiner", "Combiner"],
             ["riser", "Riser"],
             ["dascable", "Cable"],
           ].map(([tool, label]) => (

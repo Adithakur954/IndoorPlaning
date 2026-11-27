@@ -12,7 +12,7 @@ results are not affected by anything in it.
 | 1 | Wi-Fi and cellular separated (scene export by network, own route, own worker, license gate, Wi-Fi staleness ignores antennas) | done |
 | 2 | Catalogue + carriers + antenna patterns → RSRP / SINR map | done |
 | 3 | Several floors: floor heights and alignment | next |
-| 4 | DAS network editor; link-budget power feeds each antenna | editor + calculated port powers done; vendor datasheets for cables / splitters / couplers pending (placeholders) |
+| 4 | DAS network editor; link-budget power feeds each antenna | editor + calculated port powers done; datasheet values: Frog splitters / couplers / 1/2" feeder / adaptor / combiners, RFS LCF78-50JA 7/8" riser feeder |
 | 5 | BOQ from the network, rule tables, export templates | to do |
 | 6 | Trunking diagram, cellular report | to do |
 | 7 | Sionna SYS (MCS, throughput), several operators | to do |
@@ -41,7 +41,10 @@ results are not affected by anything in it.
    the part or antenna it feeds (also on another floor). Cable length = run on the plan + floor
    height + extra length; loss per frequency from the cable table, plus connectors. Every antenna
    a source feeds gets its port power from the network (its panel shows the loss chain); the
-   others keep their typed power. Loss values are placeholders until the datasheets are entered.
+   others keep their typed power. Losses come from the datasheets (splitter 2/3/4-way 3.4 / 5.4 / 6.6 dB;
+   coupler tap = its value, through 2.2 / 1.4 / 1.1 / 0.6 / 0.4 dB for 5 / 7 / 10 / 15 / 20 dB; 1/2" superflex
+   16.0 dB/100 m at 1800 MHz; 7/8" riser 7.94 dB/100 m at 3500 MHz; 0.1 dB per connector; combiner 3.8 / 3.9 / 7.0 dB).
+   Cables to or from a riser, or between floors, default to the 7/8" feeder.
 6. Editor → **Prediction** → **Place antenna**; select one to change its model, sector, port power,
    height, mounting, azimuth and downtilt.
 7. Press **Prediction**, choose the band and **Run prediction**. The map shows RSRP or SINR of the best

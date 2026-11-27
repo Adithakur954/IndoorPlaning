@@ -9,7 +9,8 @@ import { cellularOf } from "../../infra/cellular/model.js";
 import { DAS_TYPES, DEFAULT_SOURCE_POWER_DBM, cableLengthM, cableLossAt, dasPowers } from "../../infra/cellular/das.js";
 
 const fmt = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : "–");
-const PLACEHOLDER = "Loss values are placeholders until the cable, splitter and coupler datasheets are entered.";
+// where the loss values come from (engine/catalogue.js)
+const sourceNote = (entry) => (entry?.source ? <p className="hint">Values: {entry.source}.</p> : null);
 
 const activeCarrier = (plan, cellular) => cellularOf(plan).carriers.find((x) => x.id === cellular?.carrierId) || null;
 
@@ -52,7 +53,7 @@ export function DasPartInspector({ plan, part, mutate, cellular }) {
               type="button"
               className={part.partId === sp.id ? "active" : ""}
               disabled={outputs.length > sp.ways}
-              title={`${sp.name}: ${fmt(splitterLossDb(sp))} dB per output`}
+              title={`${sp.name} ${sp.model || ""}: ${fmt(splitterLossDb(sp))} dB per output`}
               onClick={() => patch({ partId: sp.id })}
             >
               {sp.ways}-way · {fmt(splitterLossDb(sp))} dB
@@ -77,10 +78,21 @@ export function DasPartInspector({ plan, part, mutate, cellular }) {
           <p className="hint">The first cable drawn from a coupler is its through output, the second its tap (each cable can be switched).</p>
         </>
       )}
+      {part.dasType === "combiner" && (
+        <Field
+          label="Combiner"
+          value={part.partId || "cm21"}
+          options={["cm21", "cm22", "cm44"]}
+          optionLabels={Object.fromEntries(
+            ["cm21", "cm22", "cm44"].map((id) => [id, `${DEFAULT_CATALOGUE.inline[id].name}: −${fmt(DEFAULT_CATALOGUE.inline[id].lossDb)} dB`]),
+          )}
+          onChange={(v) => patch({ partId: v })}
+        />
+      )}
       {part.dasType === "riser" && (
         <p className="hint">
           Where the cable changes floor: draw a cable from the shaft part on one floor to a riser on the next (the floor height
-          is added to its length), then go on from the riser.
+          is added to its length), then go on from the riser. Riser cables default to the 7/8" low-loss feeder.
         </p>
       )}
       {carrier && Number.isFinite(inDbm) && (
@@ -93,7 +105,15 @@ export function DasPartInspector({ plan, part, mutate, cellular }) {
           {e}
         </p>
       ))}
-      <p className="hint">{PLACEHOLDER}</p>
+      {sourceNote(
+        part.dasType === "splitter"
+          ? DEFAULT_CATALOGUE.splitters[part.partId]
+          : part.dasType === "coupler"
+            ? DEFAULT_CATALOGUE.couplers[part.partId]
+            : part.dasType === "combiner"
+              ? DEFAULT_CATALOGUE.inline[part.partId]
+              : null,
+      )}
     </div>
   );
 }
@@ -145,7 +165,8 @@ export function DasCableInspector({ plan, cable, mutate, cellular, onDelete }) {
           : ""}
       </p>
       {loss?.error && <p className="warn">{loss.error}</p>}
-      <p className="hint">{PLACEHOLDER}</p>
+      {sourceNote(DEFAULT_CATALOGUE.cables[cable.cableId || "1/2"])}
+      {sourceNote(DEFAULT_CATALOGUE.connector)}
       <button type="button" className="danger-text" onClick={onDelete}>
         Delete cable
       </button>

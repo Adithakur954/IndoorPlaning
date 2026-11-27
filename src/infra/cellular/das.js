@@ -1,5 +1,5 @@
 // The passive DAS network of a cellular project, as drawn in the editor:
-//   parts  = plan sources of kind "das" (dasType "source" | "splitter" | "coupler" | "riser")
+//   parts  = plan sources of kind "das" (dasType "source" | "splitter" | "coupler" | "combiner" | "riser")
 //   cables = plan.cellular.cables: [{ id, from, to, cableId, extraM, connectors, port? }]
 // and the cellular antennas (kind "cellular") at the ends. Each source (BTS or
 // repeater, one output power per band) feeds a tree; every connected antenna
@@ -13,15 +13,19 @@ export const DAS_TYPES = {
   source: { label: "Source (BTS / repeater)", short: "S", engine: "bts" },
   splitter: { label: "Splitter", short: "SP", engine: "splitter" },
   coupler: { label: "Coupler", short: "C", engine: "coupler" },
+  combiner: { label: "Combiner", short: "CB", engine: "inline" },
   riser: { label: "Riser", short: "R", engine: "riser" },
 };
 export const DEFAULT_SOURCE_POWER_DBM = 43;
+// horizontal runs: the 1/2" superflex feeder of the supplied design; the riser
+// (shaft, between floors): 7/8" low-loss feeder, as usual for long vertical runs
 export const DEFAULT_CABLE_ID = "1/2";
+export const RISER_CABLE_ID = "7/8";
 
 export const dasParts = (plan, floorId) =>
   (plan?.sources || []).filter((s) => s.kind === "das" && (!floorId || s.floorId === floorId));
 
-// Parts and cables use placeholder values until the vendor's datasheets are entered.
+// Parts and cables: the datasheet values of engine/catalogue.js; antennas: the project's models.
 export const dasCatalogue = (plan) => ({ ...DEFAULT_CATALOGUE, antennas: antennaModels(plan) });
 
 // A new part placed on the plan.
@@ -38,6 +42,7 @@ export function newDasPart(plan, dasType, floorId, { x, z }, id) {
     heightM: 3,
     ...(dasType === "splitter" ? { partId: "s2" } : {}),
     ...(dasType === "coupler" ? { partId: "c10" } : {}),
+    ...(dasType === "combiner" ? { partId: "cm21" } : {}),
     ...(dasType === "source" ? { powerDbm: {} } : {}),
   };
 }
@@ -73,7 +78,8 @@ export function cableProblem(plan, fromId, toId) {
     const ways = DEFAULT_CATALOGUE.splitters[from.partId]?.ways ?? 2;
     if (out >= ways) return `${from.name} is a ${ways}-way splitter and all its outputs are used.`;
   }
-  if (from.dasType === "riser" && out >= 1) return `${from.name} already continues to another part.`;
+  if ((from.dasType === "riser" || from.dasType === "combiner") && out >= 1)
+    return `${from.name} already continues to another part.`;
   // no loops: the new end must not lead back to the start
   const below = new Set([toId]);
   for (let grew = true; grew; ) {
@@ -91,12 +97,15 @@ export function cableProblem(plan, fromId, toId) {
 // The cable record for a new connection; a coupler's first output is "through", its second "tap".
 export function newCable(plan, fromId, toId, id) {
   const from = plan.sources.find((s) => s.id === fromId);
+  const to = plan.sources.find((s) => s.id === toId);
   const used = cellularOf(plan).cables.filter((c) => c.from === fromId).map((c) => c.port);
+  // a cable in the shaft (to or from a riser, or between floors) is the riser feeder
+  const riser = from?.dasType === "riser" || to?.dasType === "riser" || (from && to && from.floorId !== to.floorId);
   return {
     id,
     from: fromId,
     to: toId,
-    cableId: DEFAULT_CABLE_ID,
+    cableId: riser ? RISER_CABLE_ID : DEFAULT_CABLE_ID,
     extraM: 0,
     connectors: 2,
     ...(from?.dasType === "coupler" ? { port: used.includes("through") ? "tap" : "through" } : {}),

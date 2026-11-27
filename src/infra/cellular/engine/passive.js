@@ -51,11 +51,15 @@ export function couplerIdealThroughLossDb(couplingDb) {
 // Datasheet excess loss is the heat and mismatch loss on top of the ideal split.
 const excess = (part) => Number(part.excessLossDb ?? part.insertionLossDb ?? 0);
 
+// A datasheet that gives the port losses directly (tapLossDb, throughLossDb) is
+// used as it is; otherwise they follow from the coupling value and excess loss.
 export const couplerTapLossDb = (coupler) =>
-  coupler.couplingDb + excess(coupler);
+  Number.isFinite(coupler.tapLossDb) ? coupler.tapLossDb : coupler.couplingDb + excess(coupler);
 
 export const couplerThroughLossDb = (coupler) =>
-  couplerIdealThroughLossDb(coupler.couplingDb) + excess(coupler);
+  Number.isFinite(coupler.throughLossDb)
+    ? coupler.throughLossDb
+    : couplerIdealThroughLossDb(coupler.couplingDb) + excess(coupler);
 
 // Equal splitter with n outputs: each output gets 1/n of the power.
 export const splitterLossDb = (splitter) =>

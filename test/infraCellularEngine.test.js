@@ -10,6 +10,8 @@ import {
 import {
   cableLossDb,
   couplerIdealThroughLossDb,
+  couplerTapLossDb,
+  couplerThroughLossDb,
   lossAtFrequency,
   splitterLossDb,
 } from "../src/infra/cellular/engine/passive.js";
@@ -288,10 +290,21 @@ test("uplink: reciprocal loss, noise funnelling grows with the antenna count", (
   assert.ok(computeUplink({ downlink: one, bts }).noiseRiseDb < up.noiseRiseDb);
 });
 
-test("the default catalogue marks every value as illustrative", () => {
+test("the default catalogue has the datasheet values and says where each comes from", () => {
   for (const group of ["antennas", "cables", "couplers", "splitters", "inline"])
-    for (const item of Object.values(DEFAULT_CATALOGUE[group]))
-      assert.match(item.source, /illustrative/);
-  // and the defaults work with the engine at a supported band
-  assert.ok(cableLossDb(DEFAULT_CATALOGUE.cables["7/8"], 10, 1800) > 0);
+    for (const item of Object.values(DEFAULT_CATALOGUE[group])) assert.ok(item.source, `${group}/${item.id} has a source`);
+  // splitters: the datasheet insertion loss is the whole loss per output
+  near(splitterLossDb(DEFAULT_CATALOGUE.splitters.s2), 3.4, 1e-9);
+  near(splitterLossDb(DEFAULT_CATALOGUE.splitters.s3), 5.4, 1e-9);
+  near(splitterLossDb(DEFAULT_CATALOGUE.splitters.s4), 6.6, 1e-9);
+  // couplers: tap = coupler value, through = datasheet insertion loss
+  assert.equal(couplerTapLossDb(DEFAULT_CATALOGUE.couplers.c10), 10);
+  assert.equal(couplerThroughLossDb(DEFAULT_CATALOGUE.couplers.c10), 1.1);
+  assert.equal(couplerThroughLossDb(DEFAULT_CATALOGUE.couplers.c20), 0.4);
+  // cables at printed frequencies (dB per 100 m)
+  near(cableLossDb(DEFAULT_CATALOGUE.cables["1/2"], 100, 1800), 16.0, 1e-9);
+  near(cableLossDb(DEFAULT_CATALOGUE.cables["1/2"], 100, 3800), 25.0, 1e-9);
+  near(cableLossDb(DEFAULT_CATALOGUE.cables["7/8"], 100, 3500), 7.94, 1e-9);
+  near(cableLossDb(DEFAULT_CATALOGUE.cables["7/8"], 100, 700), 3.25, 1e-9);
+  assert.equal(DEFAULT_CATALOGUE.connector.lossDb, 0.1);
 });

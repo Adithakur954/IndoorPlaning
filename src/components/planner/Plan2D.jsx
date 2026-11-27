@@ -66,6 +66,15 @@ function SourceSymbol({ s, r, stroke, selected }) {
         <path d={`M${x} ${z + k}L${x} ${z - k}M${x - k * 0.6} ${z - k * 0.3}L${x} ${z - k}L${x + k * 0.6} ${z - k * 0.3}`} stroke="white" strokeWidth={stroke} fill="none" />
       </g>
     );
+  if (s.dasType === "combiner")
+    return (
+      <g>
+        {box("#374151")}
+        <text x={x} y={z} fontSize={r * 0.9} fontWeight={700} fill="white" textAnchor="middle" dominantBaseline="central" pointerEvents="none">
+          CB
+        </text>
+      </g>
+    );
   if (s.dasType === "coupler")
     return (
       <g>
