@@ -5,7 +5,7 @@ import { LAYERS } from "../../config/layers.js";
 const toolLabels = {
   select: "Select",
   rectangle: "Rectangle",
-  circle: "Circle",
+  circle: "Circle room",
   polygon: "Polygon",
   boundary: "Boundary",
   wall: "Wall",
@@ -74,11 +74,13 @@ export function EditorToolOptions({
 }) {
   // a project places only its own network: APs in Wi-Fi, antennas and the DAS in cellular
   const isHidden = (value) => (workspace === "cellular" ? value === "wifi" : CELLULAR_TOOLS.includes(value));
-  return (
+  // two groups, so a drawing tool (Circle room ...) is never taken for a network one (Cable ...)
+  const network = workspace === "cellular" ? CELLULAR_TOOLS : ["wifi"];
+  const group = (title, values) => (
     <>
-      <div className="popover-label">DRAW TOOLS</div>
+      <div className="popover-label">{title}</div>
       <div className="editor-tool-grid">
-        {Object.entries(toolLabels).filter(([value]) => !isHidden(value)).map(([value, label]) => (
+        {values.map((value) => (
           <button
             key={value}
             type="button"
@@ -86,10 +88,17 @@ export function EditorToolOptions({
             aria-pressed={tool === value}
             onClick={() => setTool(value)}
           >
-            {label}
+            {toolLabels[value]}
           </button>
         ))}
       </div>
+    </>
+  );
+  const draw = Object.keys(toolLabels).filter((value) => !isHidden(value) && !network.includes(value));
+  return (
+    <>
+      {group("DRAW (BUILDING)", draw)}
+      {group(workspace === "cellular" ? "DAS NETWORK (ANTENNAS, PARTS, CABLES)" : "WI-FI", network.filter((v) => !isHidden(v)))}
       <div className="popover-controls">
         <label className="check popover-snap">
           <input

@@ -25,7 +25,55 @@ const shortApName = (name) =>
 
 
 
-const DAS_PLACING_TOOLS = ["dassource", "splitter", "coupler", "combiner", "riser"];
+// tools that place one item per click: a click on an existing antenna, AP or DAS part
+// selects it instead of putting a new item (or a circle room) on top of it
+const DAS_PLACING_TOOLS = ["dassource", "splitter", "coupler", "combiner", "riser", "cellular", "wifi", "circle"];
+
+
+// One connector of a DAS part or antenna while drawing a cable: a small square,
+// orange when free to connect, grey when a cable already uses it.
+function Connector({ x, z, size, free, label, side, font, stroke, chosen, onPick }) {
+  return (
+    <g
+      className={onPick && free ? "das-end" : undefined}
+      onPointerDown={
+        onPick
+          ? (e) => {
+              e.stopPropagation();
+              onPick();
+            }
+          : undefined
+      }
+    >
+      {/* a wider invisible square: easy to hit */}
+      {onPick && <rect x={x - size} y={z - size} width={size * 2} height={size * 2} fill="transparent" />}
+      <rect
+        x={x - size / 2}
+        y={z - size / 2}
+        width={size}
+        height={size}
+        rx={size * 0.15}
+        fill={chosen ? "#16a34a" : free ? "#f97316" : "#9ca3af"}
+        stroke="white"
+        strokeWidth={stroke * 0.6}
+      />
+      {label && (
+        <text
+          x={side === "left" ? x - size : x + size}
+          y={z}
+          fontSize={font}
+          fontWeight={700}
+          fill={chosen ? "#15803d" : free ? "#c2410c" : "#6b7280"}
+          textAnchor={side === "left" ? "end" : "start"}
+          dominantBaseline="middle"
+          className="plan-label"
+        >
+          {label}
+        </text>
+      )}
+    </g>
+  );
+}
 
 // Plan symbols. Wi-Fi AP: a filled dot. Cellular antenna: a circle with an X
 // (a wall panel also shows where it points). DAS parts: a source box, a
@@ -141,6 +189,9 @@ export default function Plan2D({
   dasPorts = {},
   // hover text of DAS parts and antennas: ports, connections, connector
   portInfo = {},
+  // Cable tool: the item whose end is being chosen, and the chosen start end
+  cablePick = null,
+  cableStartPort = null,
 }) {
   const unit = useMeasurementUnit();
   const shown = (id) => !hiddenLayers.includes(id);
@@ -152,7 +203,9 @@ export default function Plan2D({
     [polyCursor, setPolyCursor] = useState(null),
     // rectangle being drawn: press at one corner, drag to the opposite corner
     [rectDraft, setRectDraft] = useState(null),
-    [pan, setPan] = useState({ x: 0, z: 0 });
+    [pan, setPan] = useState({ x: 0, z: 0 }),
+    // the DAS part or antenna under the pointer while drawing a cable
+    [hoverId, setHoverId] = useState(null);
   const rooms = plan.rooms.filter((r) => r.floorId === floorId),
     doors = plan.doors.filter((d) => d.floorId === floorId),
     windows = plan.windows.filter((w) => w.floorId === floorId),
@@ -261,8 +314,8 @@ export default function Plan2D({
       onPlace("dascable", { id });
       return;
     }
-    // with a DAS placing tool, a click on an existing part or antenna selects it
-    // (its properties open) instead of placing a new part on top of it
+    // with a placing tool, a click on an existing antenna or part selects it
+    // (its properties open) instead of placing something on top of it
     if (DAS_PLACING_TOOLS.includes(tool) && type === "source") {
       onSelect(entity(type, id));
       return;
@@ -1029,17 +1082,32 @@ export default function Plan2D({
             ))}
           </g>
         )}
-        {(shown("sources") ? sources : []).map((s) => (
+        {(shown("sources") ? sources : []).map((s) => {
+          const ports = tool === "dascable" ? dasPorts[s.id] : null;
+          // the item under the pointer and the cable's start pop out while drawing a cable
+          const picking = Boolean(ports) && cablePick === s.id;
+          const big = Boolean(ports) && (picking || hoverId === s.id || cableFrom === s.id);
+          // the item whose end is being chosen is the largest, so its ends are easy to click
+          const k = picking ? 1.9 : big ? 1.5 : 1;
+          const endSize = apR * (picking ? 1.0 : big ? 0.75 : 0.5);
+          const pick = (port, dir) => () => onPlace("dasport", { id: s.id, port, dir });
+          const isStart = (port) => cableStartPort?.id === s.id && cableStartPort.port === port;
+          return (
           <g
             key={s.id}
             onPointerDown={(e) => down(e, "source", s.id)}
-            className="draggable"
+            onPointerEnter={ports ? () => setHoverId(s.id) : undefined}
+            onPointerLeave={ports ? () => setHoverId((h) => (h === s.id ? null : h)) : undefined}
+            className={ports ? "das-connectable" : "draggable"}
           >
             {cableFrom === s.id && (
               <circle cx={s.x} cy={s.z} r={apR * 1.8} fill="none" stroke="#e8790a" strokeWidth={apStroke * 1.5} strokeDasharray={`${apR / 2} ${apR / 3}`} />
             )}
             {portInfo[s.id] && <title>{portInfo[s.id]}</title>}
-            <SourceSymbol s={s} r={apR} stroke={apStroke} selected={selected?.type === "source" && selected.id === s.id} />
+            {big && <circle cx={s.x} cy={s.z} r={apR * 2.1} fill="#e8790a" fillOpacity="0.14" stroke="#e8790a" strokeWidth={apStroke} />}
+            <g transform={big ? `translate(${s.x} ${s.z}) scale(${k}) translate(${-s.x} ${-s.z})` : undefined}>
+              <SourceSymbol s={s} r={apR} stroke={apStroke} selected={selected?.type === "source" && selected.id === s.id} />
+            </g>
             {(s.kind !== "wifi" || showWifiNames) && (
               <text
                 x={labelSpots[`s:${s.id}`]?.x ?? s.x}
@@ -1070,24 +1138,44 @@ export default function Plan2D({
                 {antennaPowers[s.id].toFixed(1)} dBm
               </text>
             )}
-            {tool === "dascable" && dasPorts[s.id] && (
-              // outputs of the part: filled = used, open = free (a full part takes no more cables)
-              <g pointerEvents="none">
-                {Array.from({ length: dasPorts[s.id].total }, (_, i) => (
-                  <circle
-                    key={i}
-                    cx={+s.x + apR * 1.5}
-                    cy={+s.z + (i - (dasPorts[s.id].total - 1) / 2) * apR * 0.8}
-                    r={apR * 0.28}
-                    fill={i < dasPorts[s.id].used ? "#7c3aed" : "white"}
-                    stroke="#7c3aed"
-                    strokeWidth={apStroke * 0.7}
+            {ports && (
+              // ends: the input on the left, the outputs on the right; orange = free,
+              // grey = used, green = the chosen start. Click an end to connect it.
+              <g>
+                {ports.input && (
+                  <Connector
+                    x={+s.x - apR * k - endSize * 0.9}
+                    z={+s.z}
+                    size={endSize}
+                    free={!ports.input.used}
+                    chosen={isStart(ports.input.id)}
+                    label={big ? ports.input.label : null}
+                    side="left"
+                    font={apFont * (picking ? 1 : 0.8)}
+                    stroke={apStroke}
+                    onPick={pick(ports.input.id, "in")}
+                  />
+                )}
+                {(ports.ports || []).map((port, i) => (
+                  <Connector
+                    key={port.id}
+                    x={+s.x + apR * k + endSize * 0.9}
+                    z={+s.z + (i - (ports.ports.length - 1) / 2) * endSize * 1.5}
+                    size={endSize}
+                    free={!port.cableId}
+                    chosen={isStart(port.id)}
+                    label={big ? port.label : null}
+                    side="right"
+                    font={apFont * (picking ? 1 : 0.8)}
+                    stroke={apStroke}
+                    onPick={pick(port.id, "out")}
                   />
                 ))}
               </g>
             )}
           </g>
-        ))}
+          );
+        })}
         {(shown("boundary") ? plan.boundaries || [] : [])
           .filter((b) => b.floorId === floorId)
           .map((b) => (
