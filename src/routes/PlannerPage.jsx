@@ -2337,6 +2337,7 @@ Cancel: ${what} of the optimised design instead.`,
                 />
               </label>
               <ShowMenu
+                workspace={workspace}
                 hiddenLayers={hiddenLayers}
                 onHiddenLayers={setHiddenLayers}
                 logCount={plan.logs.length}
@@ -2347,10 +2348,11 @@ Cancel: ${what} of the optimised design instead.`,
                 overlays={[
                   {
                     id: "heatmap",
-                    label: "Signal heatmap",
-                    checked: heatmap,
-                    onChange: setHeatmap,
-                    defaultOn: false,
+                    // cellular: the prediction map (RSRP / SINR), the same switch as Show / Hide map in Prediction
+                    label: workspace === "cellular" ? "Prediction map (RSRP / SINR)" : "Signal heatmap",
+                    checked: workspace === "cellular" ? cellular.show : heatmap,
+                    onChange: workspace === "cellular" ? cellular.setShow : setHeatmap,
+                    defaultOn: workspace === "cellular",
                   },
                   {
                     id: "logs",

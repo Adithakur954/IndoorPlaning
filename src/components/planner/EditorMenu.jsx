@@ -213,7 +213,7 @@ export function LegendMenu({ sections, onChange }) {
 
 // Header menu: what is drawn on the workspace. Layers that belong to the plan
 // (rooms, walls, ...) and the data overlays (heatmap, logs, names) in one place.
-export function ShowMenu({ hiddenLayers, onHiddenLayers, overlays, onManageLogs, logCount = 0 }) {
+export function ShowMenu({ hiddenLayers, onHiddenLayers, overlays, onManageLogs, logCount = 0, workspace = "wifi" }) {
   const [open, setOpen] = React.useState(false);
   const box = React.useRef(null);
   React.useEffect(() => {
@@ -253,7 +253,7 @@ export function ShowMenu({ hiddenLayers, onHiddenLayers, overlays, onManageLogs,
                 checked={!hiddenLayers.includes(layer.id)}
                 onChange={() => toggleLayer(layer.id)}
               />
-              {layer.label}
+              {layer.id === "sources" ? (workspace === "cellular" ? "Antennas and DAS network" : "Wi-Fi access points") : layer.label}
             </label>
           ))}
           <div className="popover-label">DATA AND NAMES</div>
