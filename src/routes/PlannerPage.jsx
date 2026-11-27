@@ -77,7 +77,7 @@ import {
 import { DEFAULT_LEGEND_SECTIONS } from "../components/planner/MapLegend.jsx";
 import { useCellularPrediction } from "../hooks/useCellularPrediction.js";
 import { cellularOf, newAntennaFields } from "../infra/cellular/model.js";
-import { DAS_TYPES, cableProblem, newCable, newDasPart } from "../infra/cellular/das.js";
+import { DAS_TYPES, cableProblem, cableRoute, dasPowers, newCable, newDasPart, partOutputs } from "../infra/cellular/das.js";
 import { WORKSPACES, useWorkspace, workspaceOf } from "../workspace.js";
 import WorkspaceFooter from "../components/planner/WorkspaceFooter.jsx";
 import { MeasurementUnitProvider } from "../utils/measurementUnits.jsx";
@@ -173,8 +173,11 @@ export default function PlannerPage() {
   const tabRef = useRef(tab);
   tabRef.current = tab;
   const [floorplanBusy, setFloorplanBusy] = useState("");
-  // DAS Cable tool: the part or antenna the next cable starts from
+  // DAS Cable tool: the part or antenna the next cable starts from, and the bends clicked since
   const [cableFrom, setCableFrom] = useState(null);
+  const [cablePoints, setCablePoints] = useState([]);
+  // types chosen in the DAS tool bar for the next part or cable placed
+  const [dasOptions, setDasOptions] = useState({ splitter: "s2", coupler: "c10", combiner: "cm21", cable: "auto" });
   const [projectName, setProjectName] = useState(""),
     [view, setView] = useState("2d"),
     [tool, setTool] = useState("select"),
@@ -941,16 +944,16 @@ export default function PlannerPage() {
     }
     const dasType = { dassource: "source", splitter: "splitter", coupler: "coupler", combiner: "combiner", riser: "riser" }[kind];
     if (dasType && DAS_TYPES[dasType]) {
-      const s = newDasPart(plan, dasType, floorId, p, uid());
+      const s = newDasPart(plan, dasType, floorId, p, uid(), { partId: dasOptions[dasType] });
       mutate((old) => ({ ...old, sources: [...old.sources, s] }));
       selectEntity({ type: "source", id: s.id });
     }
     if (kind === "dascable") {
       const name = (id) => plan.sources.find((s) => s.id === id)?.name || "part";
       if (!p.id) {
-        // a click on empty plan ends the cable being drawn
-        if (cableFrom) setMessage("Cable cancelled.");
-        setCableFrom(null);
+        // a click on the plan while a cable is being drawn is a bend of its route
+        if (cableFrom) setCablePoints((pts) => [...pts, { floorId, x: p.x, z: p.z }]);
+        else setMessage("Click the source, splitter, coupler, combiner or riser the cable starts from.");
         return;
       }
       if (!cableFrom) {
@@ -960,7 +963,8 @@ export default function PlannerPage() {
           return;
         }
         setCableFrom(p.id);
-        setMessage(`Cable from ${name(p.id)}: click the part or antenna it goes to (other floors too).`);
+        setCablePoints([]);
+        setMessage(`Cable from ${name(p.id)}: click corners along the route, then the part or antenna it goes to (other floors too).`);
         return;
       }
       const problem = cableProblem(plan, cableFrom, p.id);
@@ -968,13 +972,14 @@ export default function PlannerPage() {
         setMessage(problem);
         return;
       }
-      const c = newCable(plan, cableFrom, p.id, uid());
+      const c = newCable(plan, cableFrom, p.id, uid(), { cableId: dasOptions.cable, points: cablePoints });
       mutate((old) => {
         const cur = cellularOf(old);
         return { ...old, cellular: { ...(old.cellular || {}), ...cur, cables: [...cur.cables, c] } };
       });
       setMessage(`Cable ${name(cableFrom)} → ${name(p.id)} added. Click the next start, or Cursor to stop.`);
       setCableFrom(null);
+      setCablePoints([]);
       return;
     }
     if (kind === "cellular" || kind === "wifi") {
@@ -1924,27 +1929,78 @@ Cancel: ${what} of the optimised design instead.`,
   ]);
   const cableDesign = useCableOverlay(plan, showCables);
   useEffect(() => {
-    if (tool !== "dascable") setCableFrom(null);
+    if (tool !== "dascable") {
+      setCableFrom(null);
+      setCablePoints([]);
+    }
   }, [tool]);
   // DAS cables with an end on this floor (dashed when the other end is on another floor)
   const dasCables = useMemo(() => {
-    const at = new Map(plan.sources.map((s) => [s.id, s]));
     return (plan.cellular?.cables || []).flatMap((c) => {
-      const a = at.get(c.from);
-      const b = at.get(c.to);
-      if (!a || !b || (a.floorId !== floorId && b.floorId !== floorId)) return [];
-      const here = a.floorId === floorId ? a : b;
-      const there = here === a ? b : a;
-      const otherFloor = a.floorId !== b.floorId;
-      // a cable to another floor is drawn as a short stub from its end on this floor
-      const end = otherFloor ? { x: +here.x + 1.2, z: +here.z - 1.2 } : { x: +there.x, z: +there.z };
-      return [{ id: c.id, port: c.port, otherFloor, x1: +here.x, z1: +here.z, x2: end.x, z2: end.z }];
+      const route = cableRoute(plan, c);
+      if (route.length < 2 || !route.some((p) => p.floorId === floorId)) return [];
+      const otherFloor = route[0].floorId !== route[route.length - 1].floorId;
+      // the runs of the route on this floor (bends included)
+      const runs = [];
+      let run = [];
+      for (const p of route) {
+        if (p.floorId === floorId) run.push(p);
+        else if (run.length) {
+          runs.push(run);
+          run = [];
+        }
+      }
+      if (run.length) runs.push(run);
+      // a cable that only touches this floor at one end: a short stub toward the shaft
+      const drawn = runs.map((r) => (r.length > 1 ? r : [r[0], { x: r[0].x + 1.2, z: r[0].z - 1.2 }]));
+      const first = drawn[0];
+      const mid = first[Math.floor((first.length - 1) / 2)];
+      const next = first[Math.floor((first.length - 1) / 2) + 1] || mid;
+      return [{
+        id: c.id,
+        otherFloor,
+        runs: drawn,
+        label: c.port === "tap" ? { text: "tap", x: (mid.x + next.x) / 2, z: (mid.z + next.z) / 2 } : null,
+      }];
     });
-  }, [plan.sources, plan.cellular?.cables, floorId]);
+  }, [plan, floorId]);
+  // the cable being drawn: its start (when on this floor) and its bends on this floor
+  const cableDraft = useMemo(() => {
+    if (!cableFrom) return null;
+    const start = plan.sources.find((s) => s.id === cableFrom);
+    return {
+      start: start && start.floorId === floorId ? { x: +start.x, z: +start.z } : null,
+      points: cablePoints.filter((p) => p.floorId === floorId),
+    };
+  }, [cableFrom, cablePoints, plan.sources, floorId]);
+  // port power of each antenna at the band chosen in Prediction, and the outputs of each DAS part
+  const dasCarrier = workspace === "cellular" ? cellularOf(plan).carriers.find((x) => x.id === cellular.carrierId) : null;
+  const antennaPowers = useMemo(() => {
+    if (!dasCarrier || !(plan.cellular?.cables || []).length) return {};
+    return Object.fromEntries(Object.entries(dasPowers(plan, dasCarrier).antennas).map(([id, a]) => [id, a.powerDbm]));
+  }, [plan, dasCarrier]);
+  const dasPorts = useMemo(
+    () =>
+      Object.fromEntries(
+        plan.sources.filter((s) => s.kind === "das" && s.floorId === floorId).map((s) => [s.id, partOutputs(plan, s)]),
+      ),
+    [plan, floorId],
+  );
   const measurementUnit = plan.property?.unit || "m";
   const panelProps = {
     dasCables,
     cableFrom,
+    cableDraft,
+    cablePoints,
+    antennaPowers,
+    dasPorts,
+    dasOptions,
+    setDasOptions,
+    cancelCable: () => {
+      setCableFrom(null);
+      setCablePoints([]);
+    },
+    undoCableBend: () => setCablePoints((pts) => pts.slice(0, -1)),
     tool,
     setTool,
     view,

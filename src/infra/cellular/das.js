@@ -29,8 +29,10 @@ export const dasParts = (plan, floorId) =>
 export const dasCatalogue = (plan) => ({ ...DEFAULT_CATALOGUE, antennas: antennaModels(plan) });
 
 // A new part placed on the plan.
-export function newDasPart(plan, dasType, floorId, { x, z }, id) {
+// partId: the type chosen in the tool bar (2/3/4-way, coupler dB, combiner), else the usual one
+export function newDasPart(plan, dasType, floorId, { x, z }, id, { partId } = {}) {
   const n = dasParts(plan).filter((s) => s.dasType === dasType).length + 1;
+  const part = (fallback) => ({ partId: partId || fallback });
   return {
     id,
     floorId,
@@ -40,25 +42,39 @@ export function newDasPart(plan, dasType, floorId, { x, z }, id) {
     x,
     z,
     heightM: 3,
-    ...(dasType === "splitter" ? { partId: "s2" } : {}),
-    ...(dasType === "coupler" ? { partId: "c10" } : {}),
-    ...(dasType === "combiner" ? { partId: "cm21" } : {}),
+    ...(dasType === "splitter" ? part("s2") : {}),
+    ...(dasType === "coupler" ? part("c10") : {}),
+    ...(dasType === "combiner" ? part("cm21") : {}),
     ...(dasType === "source" ? { powerDbm: {} } : {}),
   };
 }
 
 const elevationOf = (plan, floorId) => Number(plan.floors.find((f) => f.id === floorId)?.elevation) || 0;
 
-// Cable length: the run on the plan, the height between floors and any extra
-// length typed for the route (up and down walls, around obstacles).
-export function cableLengthM(plan, cable) {
+// The route of a cable: its start, the bends clicked while drawing it
+// (points: [{ floorId, x, z }]) and its end.
+export function cableRoute(plan, cable) {
   const at = (id) => plan.sources.find((s) => s.id === id);
   const a = at(cable.from);
   const b = at(cable.to);
-  if (!a || !b) return Number(cable.extraM) || 0;
-  const flat = Math.hypot(+a.x - +b.x, +a.z - +b.z);
-  const rise = Math.abs(elevationOf(plan, a.floorId) - elevationOf(plan, b.floorId));
-  return flat + rise + (Number(cable.extraM) || 0);
+  if (!a || !b) return [];
+  const node = (s) => ({ floorId: s.floorId, x: +s.x, z: +s.z });
+  return [node(a), ...(cable.points || []).map((p) => ({ floorId: p.floorId ?? a.floorId, x: +p.x, z: +p.z })), node(b)];
+}
+
+// Cable length: the run along its route on the plan, the height between floors
+// and any extra length typed (up and down walls, slack). A jumper is its fixed length.
+export function cableLengthM(plan, cable) {
+  const extra = Number(cable.extraM) || 0;
+  const fixed = DEFAULT_CATALOGUE.cables[cable.cableId]?.fixedLengthM;
+  if (fixed) return fixed + extra;
+  const route = cableRoute(plan, cable);
+  if (route.length < 2) return extra;
+  let flat = 0;
+  for (let i = 1; i < route.length; i++)
+    if (route[i].floorId === route[i - 1].floorId) flat += Math.hypot(route[i].x - route[i - 1].x, route[i].z - route[i - 1].z);
+  const rise = Math.abs(elevationOf(plan, route[0].floorId) - elevationOf(plan, route[route.length - 1].floorId));
+  return flat + rise + extra;
 }
 
 // Why a new cable from -> to cannot be drawn, or null when it can.
@@ -95,17 +111,21 @@ export function cableProblem(plan, fromId, toId) {
 }
 
 // The cable record for a new connection; a coupler's first output is "through", its second "tap".
-export function newCable(plan, fromId, toId, id) {
+// cableId: the type chosen in the tool bar; "auto" (or none) = 7/8" in the shaft, else 1/2".
+// points: the bends clicked while drawing.
+export function newCable(plan, fromId, toId, id, { cableId = "auto", points = [] } = {}) {
   const from = plan.sources.find((s) => s.id === fromId);
   const to = plan.sources.find((s) => s.id === toId);
   const used = cellularOf(plan).cables.filter((c) => c.from === fromId).map((c) => c.port);
   // a cable in the shaft (to or from a riser, or between floors) is the riser feeder
   const riser = from?.dasType === "riser" || to?.dasType === "riser" || (from && to && from.floorId !== to.floorId);
+  const chosen = DEFAULT_CATALOGUE.cables[cableId] ? cableId : riser ? RISER_CABLE_ID : DEFAULT_CABLE_ID;
   return {
     id,
     from: fromId,
     to: toId,
-    cableId: riser ? RISER_CABLE_ID : DEFAULT_CABLE_ID,
+    cableId: chosen,
+    ...(points.length ? { points } : {}),
     extraM: 0,
     connectors: 2,
     ...(from?.dasType === "coupler" ? { port: used.includes("through") ? "tap" : "through" } : {}),
@@ -181,4 +201,19 @@ export function cableLossAt(plan, cable, freqMHz) {
   } catch (e) {
     return { error: e.message };
   }
+}
+
+// How many outputs a part has and how many are used (splitter ways, coupler
+// through + tap, one for a riser / combiner / source).
+export function partOutputs(plan, part) {
+  const used = cellularOf(plan).cables.filter((c) => c.from === part.id).length;
+  const total =
+    part.dasType === "splitter"
+      ? DEFAULT_CATALOGUE.splitters[part.partId]?.ways ?? 2
+      : part.dasType === "coupler"
+        ? 2
+        : part.dasType === "source"
+          ? Math.max(1, used + 1) // a source can feed several trunks
+          : 1;
+  return { total, used };
 }

@@ -206,3 +206,85 @@ export function AntennaFeed({ plan, antenna, carrier }) {
     </div>
   );
 }
+
+// Options of the DAS tool in use, shown over the plan: the type the next part
+// gets (2/3/4-way splitter, coupler value, combiner) or the cable type, with the
+// state of the cable being drawn.
+export const DAS_TOOL_IDS = ["dassource", "splitter", "coupler", "combiner", "riser", "dascable"];
+
+export function DasToolBar({ tool, plan, dasOptions, setDasOptions, cableFrom, cablePoints = [], cancelCable, undoCableBend }) {
+  if (!DAS_TOOL_IDS.includes(tool)) return null;
+  const set = (key, value) => setDasOptions((o) => ({ ...o, [key]: value }));
+  const choice = (key, items) => (
+    <div className="segmented" role="group">
+      {items.map(([value, label, title]) => (
+        <button key={value} type="button" title={title} className={dasOptions[key] === value ? "active" : ""} onClick={() => set(key, value)}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+  const start = cableFrom ? plan.sources.find((s) => s.id === cableFrom) : null;
+  return (
+    <div className="das-toolbar" role="toolbar" aria-label="DAS tool options">
+      {tool === "splitter" && (
+        <>
+          <strong>Splitter</strong>
+          {choice(
+            "splitter",
+            Object.values(DEFAULT_CATALOGUE.splitters).map((s) => [s.id, `${s.ways}-way`, `${fmt(splitterLossDb(s))} dB per output`]),
+          )}
+          <small>Click on the plan to place it.</small>
+        </>
+      )}
+      {tool === "coupler" && (
+        <>
+          <strong>Coupler</strong>
+          {choice(
+            "coupler",
+            Object.values(DEFAULT_CATALOGUE.couplers).map((c) => [c.id, `${c.couplingDb} dB`, `tap −${fmt(couplerTapLossDb(c))} dB, through −${fmt(couplerThroughLossDb(c))} dB`]),
+          )}
+          <small>Click on the plan to place it.</small>
+        </>
+      )}
+      {tool === "combiner" && (
+        <>
+          <strong>Combiner</strong>
+          {choice("combiner", ["cm21", "cm22", "cm44"].map((id) => [id, DEFAULT_CATALOGUE.inline[id].name.replace("Combiner ", ""), `−${fmt(DEFAULT_CATALOGUE.inline[id].lossDb)} dB`]))}
+          <small>Click on the plan to place it.</small>
+        </>
+      )}
+      {(tool === "dassource" || tool === "riser") && (
+        <small>
+          Click on the plan to place the {tool === "riser" ? "riser (where the cable changes floor)" : "source (BTS / repeater)"}.
+        </small>
+      )}
+      {tool === "dascable" && (
+        <>
+          <strong>Cable</strong>
+          {choice("cable", [
+            ["auto", "Auto", '1/2" superflex; 7/8" in the riser and between floors'],
+            ["1/2", '1/2" superflex', DEFAULT_CATALOGUE.cables["1/2"].model],
+            ["7/8", '7/8" riser', DEFAULT_CATALOGUE.cables["7/8"].model],
+            ["jumper", "Jumper 1 m", DEFAULT_CATALOGUE.cables.jumper.model],
+          ])}
+          <small>
+            {start
+              ? `From ${start.name}: click corners along the route${cablePoints.length ? ` (${cablePoints.length} so far)` : ""}, then the part or antenna it feeds.`
+              : "Click the part the cable starts from."}
+          </small>
+          {start && cablePoints.length > 0 && (
+            <button type="button" onClick={undoCableBend}>
+              Undo bend
+            </button>
+          )}
+          {start && (
+            <button type="button" onClick={cancelCable}>
+              Cancel
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

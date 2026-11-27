@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { initialPlan } from "../src/models/plan.js";
 import { buildSceneFiles } from "../src/utils/sceneExport.js";
-import { cableLengthM, cableLossAt, cableProblem, dasPowers, newCable, newDasPart } from "../src/infra/cellular/das.js";
+import { cableLengthM, cableLossAt, cableProblem, dasPowers, newCable, newDasPart, partOutputs } from "../src/infra/cellular/das.js";
 import { buildCellularRequest } from "../src/infra/cellular/request.js";
 import { BAND_PRESETS, presetCarrierFields } from "../src/infra/cellular/bands.js";
 import { DEFAULT_CATALOGUE } from "../src/infra/cellular/engine/catalogue.js";
@@ -90,6 +90,17 @@ test("a riser cable defaults to the 7/8 feeder; a combiner adds its datasheet lo
   assert.equal(newCable(plan, "sp", "a1", "y").cableId, "1/2");
   assert.equal(comb.partId, "cm21");
   assert.equal(DEFAULT_CATALOGUE.inline.cm21.lossDb, 3.8);
+});
+
+test("parts get the type chosen when placed; cables the chosen type, bends and jumper length", () => {
+  let plan = dasPlan();
+  assert.equal(newDasPart(plan, "splitter", "f0", { x: 0, z: 0 }, "s3x", { partId: "s3" }).partId, "s3");
+  assert.equal(newCable(plan, "src", "a3", "j", { cableId: "7/8" }).cableId, "7/8");
+  // a bend at (0, 15): 5 m down then 25 m across instead of the straight 25.5 m
+  const bent = newCable(plan, "src", "a3", "b", { points: [{ floorId: "f0", x: 0, z: 15 }] });
+  near(cableLengthM(plan, bent), 5 + 25);
+  near(cableLengthM(plan, { ...bent, cableId: "jumper" }), 1);
+  assert.deepEqual(partOutputs(plan, plan.sources.find((s) => s.id === "sp")), { total: 2, used: 2 });
 });
 
 test("a cable that would break the tree is refused", () => {

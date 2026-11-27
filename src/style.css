@@ -3023,3 +3023,28 @@ p.warn {
     opacity: 0.3;
   }
 }
+
+/* options of the DAS tool in use, over the plan (cellular) */
+.das-toolbar {
+  position: absolute;
+  left: 16px;
+  bottom: 14px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  max-width: min(760px, 60%);
+  padding: 8px 12px;
+  background: #fff;
+  border: 1px solid #dce7e2;
+  border-radius: 12px;
+  box-shadow: 0 6px 20px #164a3d1f;
+  font-size: 13px;
+}
+.das-toolbar .segmented {
+  flex-wrap: nowrap;
+}
+.das-toolbar small {
+  color: #5f736c;
+}

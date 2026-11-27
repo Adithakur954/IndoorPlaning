@@ -24,6 +24,17 @@ const shortApName = (name) =>
   String(name ?? "").replace(/^AP-detected-(\d+)$/, "AP$1");
 
 
+
+// the type shown after a DAS part's name: "2-way", "10 dB", "2x1"
+const dasTypeLabel = (s) =>
+  s.dasType === "splitter"
+    ? `${{ s2: 2, s3: 3, s4: 4 }[s.partId] || 2}-way`
+    : s.dasType === "coupler"
+      ? `${String(s.partId || "c10").replace(/^c/, "")} dB`
+      : s.dasType === "combiner"
+        ? { cm21: "2x1", cm22: "2x2", cm44: "4x4" }[s.partId] || ""
+        : "";
+
 // Plan symbols. Wi-Fi AP: a filled dot. Cellular antenna: a circle with an X
 // (a wall panel also shows where it points). DAS parts: a source box, a
 // splitter (one in, several out), a coupler (through and tap) and a riser.
@@ -70,8 +81,8 @@ function SourceSymbol({ s, r, stroke, selected }) {
     return (
       <g>
         {box("#374151")}
-        <text x={x} y={z} fontSize={r * 0.9} fontWeight={700} fill="white" textAnchor="middle" dominantBaseline="central" pointerEvents="none">
-          CB
+        <text x={x} y={z} fontSize={r * 0.75} fontWeight={700} fill="white" textAnchor="middle" dominantBaseline="central" pointerEvents="none">
+          {{ cm21: "2x1", cm22: "2x2", cm44: "4x4" }[s.partId] || "CB"}
         </text>
       </g>
     );
@@ -84,16 +95,16 @@ function SourceSymbol({ s, r, stroke, selected }) {
         </text>
       </g>
     );
-  // splitter: one input on the left, outputs fanning to the right
+  // splitter: one input on the left, as many outputs fanning to the right as it has ways
+  const ways = { s2: 2, s3: 3, s4: 4 }[s.partId] || 2;
+  const fan = Array.from({ length: ways }, (_, i) => {
+    const t = ways === 1 ? 0 : (i / (ways - 1)) * 2 - 1;
+    return `M${x - k * 0.1} ${z}L${x + k} ${z + t * k * 0.8}`;
+  }).join("");
   return (
     <g>
       <circle cx={x} cy={z} r={r} fill={ink} stroke={ring || "white"} strokeWidth={stroke} />
-      <path
-        d={`M${x - k} ${z}L${x - k * 0.1} ${z}M${x - k * 0.1} ${z}L${x + k} ${z - k * 0.7}M${x - k * 0.1} ${z}L${x + k} ${z + k * 0.7}M${x - k * 0.1} ${z}L${x + k} ${z}`}
-        stroke="white"
-        strokeWidth={stroke * 0.9}
-        fill="none"
-      />
+      <path d={`M${x - k} ${z}L${x - k * 0.1} ${z}${fan}`} stroke="white" strokeWidth={stroke * 0.9} fill="none" />
     </g>
   );
 }
@@ -131,6 +142,11 @@ export default function Plan2D({
   // DAS network (cellular): cables drawn on this floor, the part a new cable starts from
   dasCables = [],
   cableFrom = null,
+  // the cable being drawn: { x, z } of its start on this floor and its bends here
+  cableDraft = null,
+  // port power per antenna at the chosen band, and used / free outputs per DAS part
+  antennaPowers = {},
+  dasPorts = {},
 }) {
   const unit = useMeasurementUnit();
   const shown = (id) => !hiddenLayers.includes(id);
@@ -925,25 +941,42 @@ export default function Plan2D({
                 e.stopPropagation();
                 if (tool === "select") onSelect(entity("dascable", c.id));
               }}>
-                {/* wide invisible line: easy to click */}
-                <line x1={c.x1} y1={c.z1} x2={c.x2} y2={c.z2} stroke="transparent" strokeWidth={apR * 1.6} />
-                <line
-                  x1={c.x1}
-                  y1={c.z1}
-                  x2={c.x2}
-                  y2={c.z2}
-                  stroke={on ? "#e8790a" : "#7c3aed"}
-                  strokeWidth={apStroke * (on ? 2.2 : 1.5)}
-                  strokeDasharray={c.otherFloor ? `${apR} ${apR / 2}` : undefined}
-                />
-                {c.port === "tap" && (
-                  <text x={(c.x1 + c.x2) / 2} y={(c.z1 + c.z2) / 2} fontSize={apFont * 0.8} fill="#7c3aed" textAnchor="middle" pointerEvents="none">
-                    tap
+                {c.runs.map((run, i) => (
+                  <g key={i}>
+                    {/* wide invisible line: easy to click */}
+                    <polyline points={run.map((p) => `${p.x},${p.z}`).join(" ")} fill="none" stroke="transparent" strokeWidth={apR * 1.6} />
+                    <polyline
+                      points={run.map((p) => `${p.x},${p.z}`).join(" ")}
+                      fill="none"
+                      stroke={on ? "#e8790a" : "#7c3aed"}
+                      strokeWidth={apStroke * (on ? 2.2 : 1.5)}
+                      strokeLinejoin="round"
+                      strokeDasharray={c.otherFloor ? `${apR} ${apR / 2}` : undefined}
+                    />
+                  </g>
+                ))}
+                {c.label && (
+                  <text x={c.label.x} y={c.label.z} fontSize={apFont * 0.8} fill="#7c3aed" textAnchor="middle" pointerEvents="none">
+                    {c.label.text}
                   </text>
                 )}
               </g>
             );
           })}
+        {cableDraft && (
+          <g pointerEvents="none">
+            <polyline
+              points={[cableDraft.start, ...cableDraft.points].filter(Boolean).map((p) => `${p.x},${p.z}`).join(" ")}
+              fill="none"
+              stroke="#e8790a"
+              strokeWidth={apStroke * 1.4}
+              strokeDasharray={`${apR / 1.5} ${apR / 3}`}
+            />
+            {cableDraft.points.map((p, i) => (
+              <circle key={i} cx={p.x} cy={p.z} r={apR * 0.3} fill="#e8790a" />
+            ))}
+          </g>
+        )}
         {(shown("sources") ? sources : []).map((s) => (
           <g
             key={s.id}
@@ -967,7 +1000,39 @@ export default function Plan2D({
                 pointerEvents="none"
               >
                 {shortApName(s.name)}
+                {s.kind === "das" && dasTypeLabel(s) ? ` · ${dasTypeLabel(s)}` : ""}
               </text>
+            )}
+            {s.kind === "cellular" && Number.isFinite(antennaPowers[s.id]) && (
+              <text
+                x={s.x}
+                y={+s.z + apR + apFont * 0.75}
+                fontSize={apFont * 0.8}
+                fontWeight={600}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fill="#7c3aed"
+                className="plan-label"
+                pointerEvents="none"
+              >
+                {antennaPowers[s.id].toFixed(1)} dBm
+              </text>
+            )}
+            {tool === "dascable" && dasPorts[s.id] && (
+              // outputs of the part: filled = used, open = free (a full part takes no more cables)
+              <g pointerEvents="none">
+                {Array.from({ length: dasPorts[s.id].total }, (_, i) => (
+                  <circle
+                    key={i}
+                    cx={+s.x + apR * 1.5}
+                    cy={+s.z + (i - (dasPorts[s.id].total - 1) / 2) * apR * 0.8}
+                    r={apR * 0.28}
+                    fill={i < dasPorts[s.id].used ? "#7c3aed" : "white"}
+                    stroke="#7c3aed"
+                    strokeWidth={apStroke * 0.7}
+                  />
+                ))}
+              </g>
             )}
           </g>
         ))}

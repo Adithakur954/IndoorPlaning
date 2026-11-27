@@ -52,6 +52,17 @@ export const DEFAULT_CATALOGUE = {
       ]),
       source: FROG('1/2" Superflex Feeder Cable FR-FC4000-12-XX-XS (attenuation @ 20 °C)'),
     },
+    jumper: {
+      id: "jumper",
+      name: "Jumper 1 m (1/2\" superflex)",
+      model: "FRJ1-NTMSNTMS-0-01",
+      fixedLengthM: 1,
+      lossDbPer100m: table([
+        [150, 4.2], [450, 7.6], [800, 10.2], [900, 10.8], [1800, 16.0],
+        [2000, 17.0], [2500, 19.0], [3000, 21.5], [3800, 25.0],
+      ]),
+      source: FROG('RF Jumper FRJ1-NTMSNTMS-0-01 (1 m of 1/2" superflex, N male - N male)'),
+    },
     "7/8": {
       id: "7/8",
       name: '7/8" low-loss feeder (riser)',

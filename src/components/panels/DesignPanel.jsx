@@ -21,7 +21,7 @@ const getPanelMaxWidth = () =>
 import MapLegend from "../planner/MapLegend.jsx";
 import CellularPanel from "../planner/CellularPanel.jsx";
 import CellularLegend from "../planner/CellularLegend.jsx";
-import { DasCableInspector, DasPartInspector } from "../planner/DasInspector.jsx";
+import { DasCableInspector, DasPartInspector, DasToolBar } from "../planner/DasInspector.jsx";
 import { DAS_TYPES } from "../../infra/cellular/das.js";
 import PredictionPanel from "../planner/PredictionPanel.jsx";
 import OptimizationPanel from "../planner/OptimizationPanel.jsx";
@@ -110,6 +110,14 @@ export default function DesignPanel({
   cellular,
   dasCables = [],
   cableFrom = null,
+  cableDraft = null,
+  cablePoints = [],
+  antennaPowers = {},
+  dasPorts = {},
+  dasOptions,
+  setDasOptions,
+  cancelCable,
+  undoCableBend,
 }) {
   const unit = useMeasurementUnit();
   const [panelWidth, setPanelWidthState] = useState(() => {
@@ -194,6 +202,18 @@ export default function DesignPanel({
         style={{ "--panel-width": `${panelWidth}px` }}
       >
         <div className="view-stack">
+          {workspace === "cellular" && dasOptions && (
+            <DasToolBar
+              tool={tool}
+              plan={plan}
+              dasOptions={dasOptions}
+              setDasOptions={setDasOptions}
+              cableFrom={cableFrom}
+              cablePoints={cablePoints}
+              cancelCable={cancelCable}
+              undoCableBend={undoCableBend}
+            />
+          )}
           {workspace === "cellular" && cellular?.hasResult && cellular.show ? (
             <CellularLegend cellular={cellular} floorId={floorId} />
           ) : (
@@ -268,6 +288,9 @@ export default function DesignPanel({
                 hiddenLayers,
                 dasCables,
                 cableFrom,
+                cableDraft,
+                antennaPowers,
+                dasPorts,
               }}
             />
           )}
