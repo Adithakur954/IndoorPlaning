@@ -5,12 +5,21 @@
 //     1/2" superflex feeder FR-FC4000-12-XX-XS, adaptor FR-AD0040-NMRA-NFXX-XC,
 //     combiners FR-CM0740-4F-2C-21/22/44, jumpers FRJ1 (1 m of the 1/2" superflex).
 //   RFS LCF78-50JA 7/8" CELLFLEX (public datasheet, rev A 19 Oct 2026): the riser feeder.
+//   iBwave "Horizontal Link Budget Report" of the supplied 5G SISO design (17-11-2026):
+//     the parts it uses, with the values iBwave applied at 3.5 GHz - Frog couplers
+//     FR-CP0642-NF-2C-5/7/10/15dB, splitters FR-SP0642-NF-2C-2W/3W, combiner
+//     FR-CM0642-NF-2J-44, the FPS240506781A-NTF3-67 inline part, and the LS Cable
+//     HFC 12D (1/2") / HFC 22D (7/8") feeders. The cable losses were solved from the
+//     report's 127 antenna paths (cable length -> cable loss, within 0.02 dB); the
+//     report gives them at 3.5 GHz only, so those cables refuse other bands until the
+//     LS Cable datasheet values are added.
 // A project with other parts replaces these with its own datasheet values.
 
 const ILLUSTRATIVE = "illustrative default - replace with the datasheet value";
 const FROG = (doc) => `Frog Cellsat datasheet: ${doc}`;
 
 const table = (pairs) => pairs.map(([freqMHz, loss]) => ({ freqMHz, loss }));
+const LINK_BUDGET = (what) => `iBwave Horizontal Link Budget Report, 5G SISO design 17-11-2026: ${what}`;
 // datasheet "insertion loss" of an n-way splitter is the whole loss per output:
 // the equal split 10*log10(n) plus the part's own (excess) loss
 const splitter = (id, ways, insertionLossDb, model) => ({
@@ -42,6 +51,20 @@ export const DEFAULT_CATALOGUE = {
     patch7: { id: "patch7", name: "7 dBi directional patch antenna", gainDbi: 7, pattern: "patch", source: ILLUSTRATIVE },
   },
   cables: {
+    hfc12d: {
+      id: "hfc12d",
+      name: 'HFC 12D 1/2" feeder (LS Cable)',
+      model: "HFC 12D",
+      lossDbPer100m: table([[3500, 15.8]]),
+      source: LINK_BUDGET("LS Cable HFC 12D, 15.80 dB/100 m at 3.5 GHz (solved from the cable lengths and losses)"),
+    },
+    hfc22d: {
+      id: "hfc22d",
+      name: 'HFC 22D 7/8" feeder (LS Cable)',
+      model: "HFC 22D",
+      lossDbPer100m: table([[3500, 9.42]]),
+      source: LINK_BUDGET("LS Cable HFC 22D, 9.42 dB/100 m at 3.5 GHz (solved from the cable lengths and losses)"),
+    },
     "1/2": {
       id: "1/2",
       name: '1/2" superflex feeder',
@@ -83,18 +106,60 @@ export const DEFAULT_CATALOGUE = {
       coupler(10, 1.1, "FR-CP0740-NF-6C-10dB"),
       coupler(15, 0.6, "FR-CP0740-NF-6C-15dB"),
       coupler(20, 0.4, "FR-CP0740-NF-6C-20dB"),
+      ...[
+        [5, 2.1],
+        [7, 1.5],
+        [10, 0.8],
+        [15, 0.5],
+      ].map(([db, thru]) => ({
+        ...coupler(db, thru, `FR-CP0642-NF-2C-${db}dB`),
+        id: `cp0642-${db}`,
+        name: `${db} dB coupler (FR-CP0642)`,
+        maxPowerW: 100,
+        source: LINK_BUDGET(`Frog FR-CP0642-NF-2C-${db}dB, tap -${db.toFixed(2)} dB, through -${thru.toFixed(2)} dB (698-3800 MHz, 100 W/port)`),
+      })),
     ].map((c) => [c.id, c]),
   ),
   splitters: {
     s2: splitter("s2", 2, 3.4, "FR-SP0740-NF-6C-2W"),
     s3: splitter("s3", 3, 5.4, "FR-SP0740-NF-6C-3W"),
     s4: splitter("s4", 4, 6.6, "FR-SP0740-NF-6C-4W"),
+    ...Object.fromEntries(
+      [
+        [2, 3.5],
+        [3, 5.5],
+      ].map(([ways, il]) => [
+        `sp0642-${ways}w`,
+        {
+          ...splitter(`sp0642-${ways}w`, ways, il, `FR-SP0642-NF-2C-${ways}W`),
+          name: `${ways}-way splitter (FR-SP0642)`,
+          maxPowerW: 100,
+          source: LINK_BUDGET(`Frog FR-SP0642-NF-2C-${ways}W, -${il.toFixed(2)} dB per output (698-3800 MHz, 100 W/port)`),
+        },
+      ]),
+    ),
   },
   inline: {
     cm21: { id: "cm21", name: "Combiner 2x1", lossDb: 3.8, maxPowerW: 100, model: "FR-CM0740-4F-2C-21", source: FROG("Combiner 2x1 FR-CM0740-4F-2C-21 (insertion loss 3.8 ± 0.5 dB)") },
     cm22: { id: "cm22", name: "Combiner 2x2", lossDb: 3.9, maxPowerW: 100, model: "FR-CM0740-4F-2C-22", source: FROG("Combiner 2x2 FR-CM0740-4F-2C-22 (insertion loss 3.9 ± 0.2 dB)") },
     cm44: { id: "cm44", name: "Combiner 4x4", lossDb: 7.0, maxPowerW: 100, model: "FR-CM0740-4F-2C-44", source: FROG("Combiner 4x4 FR-CM0740-4F-2C-44 (insertion loss 7.0 ± 0.2 dB)") },
     combiner: { id: "combiner", name: "combiner (series loss)", lossDb: 0.5, maxPowerW: 200, source: ILLUSTRATIVE },
+    "cm0642-44": {
+      id: "cm0642-44",
+      name: "Combiner 4x4 (FR-CM0642)",
+      outputs: 4,
+      lossDb: 6.2,
+      maxPowerW: 100,
+      model: "FR-CM0642-NF-2J-44",
+      source: LINK_BUDGET("Frog FR-CM0642-NF-2J-44, -6.20 dB"),
+    },
+    "fps2405": {
+      id: "fps2405",
+      name: "FPS240506781A-NTF3-67 (inline, 0.5 dB)",
+      lossDb: 0.5,
+      model: "FPS240506781A-NTF3-67",
+      source: LINK_BUDGET('Frog "Other" part FPS240506781A-NTF3-67, -0.50 dB on every antenna path'),
+    },
   },
   // where a cable changes floor: no part of its own unless the project imports one
   risers: {

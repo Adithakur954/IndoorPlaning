@@ -3,8 +3,7 @@
 import { inside } from "../utils/geometry.js";
 
 // A dev-proxy 500/502/504 with no JSON body means the service itself is down.
-const SERVICE_DOWN =
-  "Cannot reach the simulation service. Start it with `npm run sim:service` (port 3002) and try again.";
+export const SERVICE_DOWN = "Cannot reach the simulation service. Restart the planner and try again.";
 const call = (url, init) =>
   fetch(url, init).catch(() => {
     throw Error(SERVICE_DOWN);

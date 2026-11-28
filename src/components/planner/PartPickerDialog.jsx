@@ -57,7 +57,7 @@ export const PART_TYPES = {
   splitter: { type: "splitter", label: "Splitter", option: "splitter" },
   coupler: { type: "coupler", label: "Coupler", option: "coupler" },
   combiner: { type: "combiner", label: "Combiner", option: "combiner", only: (p) => Boolean(p.model) || p.imported },
-  riser: { type: "riser", label: "Riser", option: "riser" },
+  riser: { type: "riser", label: "Shaft (riser)", option: "riser" },
   dascable: { type: "cable", label: "Cable", option: "cable" },
 };
 const AUTO_CABLE = {

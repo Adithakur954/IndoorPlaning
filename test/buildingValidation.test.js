@@ -44,3 +44,11 @@ test("rooms far outside the floor image are flagged as misaligned", () => {
   );
   assert.match(warnings.join(" "), /outside the floor image/);
 });
+
+test("image alignment checks use the image offset and rotation", () => {
+  const images = { f: { offsetX: 20, offsetZ: 30, widthM: 10, heightM: 4, rotationDeg: 90 } };
+  const contained = room({ x: 23, z: 27, width: 4, depth: 9 });
+  assert.deepEqual(validateBuilding(plan({ rooms: [contained], images }), "f").warnings, []);
+  const outside = { ...contained, x: 20 };
+  assert.match(validateBuilding(plan({ rooms: [outside], images }), "f").warnings[0], /outside the floor image/);
+});

@@ -43,6 +43,9 @@ import {
 } from "../utils/logOverlay.js";
 import { num } from "../utils/number.js";
 import DesignPanel from "../components/panels/DesignPanel.jsx";
+import DasSchematic from "../components/planner/DasSchematic.jsx";
+import AddFloorDialog from "../components/planner/AddFloorDialog.jsx";
+import { duplicateFloor } from "../utils/duplicateFloor.js";
 import SettingsPanel from "../components/panels/SettingsPanel.jsx";
 import NetworkPanel from "../components/panels/NetworkPanel.jsx";
 import DataPanel from "../components/panels/DataPanel.jsx";
@@ -202,7 +205,7 @@ export default function PlannerPage() {
     [selected, setSelected] = useState(null),
     [panelMode, setPanelMode] = useState("selection"),
     [sidebarExpanded, setSidebarExpanded] = useState(false),
-    [expandedFloorId, setExpandedFloorId] = useState(null),
+    [planView, setPlanView] = useState(false),
     [snap, setSnap] = useState(true),
     [showRoomNames, setShowRoomNames] = useState(true),
     [showFurnitureNames, setShowFurnitureNames] = useState(true),
@@ -378,6 +381,26 @@ export default function PlannerPage() {
     project?.id,
     plan.preferences,
   ]);
+  // Saves send the version this window last loaded or saved; they run one after
+  // another, so a window never conflicts with its own saves. When the stored
+  // project is newer (another window, an import), the save is refused (409) and
+  // the newer version is loaded instead of being overwritten.
+  const baseVersion = useRef(null);
+  const saveChain = useRef(Promise.resolve());
+  const saveNow = (id, name, p) => {
+    const run = saveChain.current.then(() =>
+      saveProject(id, name, p, baseVersion.current).then((item) => {
+        baseVersion.current = item.updatedAt;
+        return item;
+      }),
+    );
+    saveChain.current = run.catch(() => {});
+    return run;
+  };
+  const loadNewer = (id) => {
+    setMessage("This project was changed elsewhere (another window or an import). The newer version is now open; your last change here was not saved.");
+    open(id, { keepMessage: true });
+  };
   useEffect(() => {
     if (!project || !loaded.current) return;
     const v = ++version.current;
@@ -385,23 +408,25 @@ export default function PlannerPage() {
     saveTimer.current = setTimeout(async () => {
       try {
         setSaveState("Saving…");
-        const item = await saveProject(project.id, projectName, plan);
+        const item = await saveNow(project.id, projectName, plan);
         if (v === version.current) {
           setProject(item);
           setSaveState("Saved");
         }
       } catch (e) {
+        if (e.status === 409) return loadNewer(project.id);
         setSaveState("Save failed");
         setMessage(e.message);
       }
     }, 650);
     return () => clearTimeout(saveTimer.current);
   }, [plan, projectName, project?.id]);
-  const open = async (id) => {
+  const open = async (id, { keepMessage = false } = {}) => {
     try {
       clearTimeout(saveTimer.current);
       loaded.current = false;
       const item = await getProject(id);
+      baseVersion.current = item.updatedAt;
       const restored = { ...initialPlan(), ...item.plan };
       const pref = restored.preferences || {};
       setProject(item);
@@ -431,7 +456,7 @@ export default function PlannerPage() {
       setSelected(null);
       setPanelMode("selection");
       setSaveState("Saved");
-      setMessage("");
+      if (!keepMessage) setMessage("");
       setTimeout(() => {
         loaded.current = true;
       }, 0);
@@ -445,8 +470,9 @@ export default function PlannerPage() {
   const back = async () => {
     if (saveState !== "Saved" && project) {
       try {
-        await saveProject(project.id, projectName, plan);
+        await saveNow(project.id, projectName, plan);
       } catch (e) {
+        if (e.status === 409) return loadNewer(project.id);
         setMessage(e.message);
         return;
       }
@@ -854,18 +880,35 @@ export default function PlannerPage() {
     if (tab !== "design") setTab("design");
     setPanelMode(mode);
   };
-  const addFloor = () => {
-    const name = window.prompt("Floor name", `Level ${plan.floors.length + 1}`);
-    if (!name?.trim()) return;
+  // the floor tabs under the ribbon: a floor opens its plan; "Design plan" (cellular) the schematic of all floors
+  const floorTabsRef = useRef(null);
+  const showPlan = workspace === "cellular" && planView && tab === "design";
+  const openFloor = (id) => {
+    setPlanView(false);
+    mutate((p) => ({ ...p, selectedFloorId: id }));
+    setSelected(null);
+    setPanelMode("selection");
+    if (tab !== "design") setTab("design");
+  };
+  // ＋ opens the Add floor window: an empty floor or a copy of one (rooms, walls, components)
+  const [addFloorOpen, setAddFloorOpen] = useState(false);
+  const addFloor = () => setAddFloorOpen(true);
+  const createFloor = ({ name, elevation, copyFrom, building, components, image }) => {
     const id = uid();
-    mutate((p) => ({
-      ...p,
-      floors: [
-        ...p.floors,
-        { id, name: name.trim(), elevation: p.floors.length * 3.2 },
-      ],
-      selectedFloorId: id,
-    }));
+    mutate((p) => {
+      const next = copyFrom
+        ? duplicateFloor(p, copyFrom, { id, name, elevation, building, components, image }, uid)
+        : { ...p, floors: [...p.floors, { id, name, elevation }] };
+      // the new floor sits among the others by height
+      const added = next.floors[next.floors.length - 1];
+      const rest = next.floors.slice(0, -1);
+      const at = rest.findIndex((f) => (Number(f.elevation) || 0) > elevation);
+      const floors = at < 0 ? [...rest, added] : [...rest.slice(0, at), added, ...rest.slice(at)];
+      return { ...next, floors, selectedFloorId: id };
+    });
+    setAddFloorOpen(false);
+    if (copyFrom) setMessage(`${name} added: a copy of ${plan.floors.find((f) => f.id === copyFrom)?.name}.`);
+    setPlanView(false);
     setSelected(null);
     setPanelMode("selection");
   };
@@ -2554,83 +2597,6 @@ Cancel: ${what} of the optimised design instead.`,
               </button>
             ))}
           </nav>
-          <div className="sidebar-heading with-action">
-            FLOORS{" "}
-            <button onClick={addFloor} title="Add floor">
-              ＋
-            </button>
-          </div>
-          <div className="floor-list">
-            {plan.floors.map((f) => {
-              const floorRooms = plan.rooms.filter(
-                (room) => room.floorId === f.id,
-              );
-              const expanded = expandedFloorId === f.id;
-              return (
-                <div className="floor-entry" key={f.id}>
-                  <div
-                    className={`floor-row ${floorId === f.id ? "active" : ""}`}
-                  >
-                    <button
-                      className="floor-select"
-                      aria-label={`Select floor ${f.name}`}
-                      title={f.name}
-                      onClick={() => {
-                        mutate((p) => ({ ...p, selectedFloorId: f.id }));
-                        setSelected(null);
-                        setPanelMode("selection");
-                      }}
-                    >
-                      <span aria-hidden="true">&#x25A4;</span>
-                      <span className="floor-name">{f.name}</span>
-                    </button>
-                    <button
-                      className={`floor-expand ${expanded ? "expanded" : ""}`}
-                      type="button"
-                      aria-label={`${expanded ? "Hide" : "Show"} rooms on ${f.name}`}
-                      aria-expanded={expanded}
-                      onClick={() => setExpandedFloorId(expanded ? null : f.id)}
-                    >
-                      <span aria-hidden="true">&#x203A;</span>
-                    </button>
-                  </div>
-                  <div
-                    className={`floor-room-disclosure ${expanded ? "open" : ""}`}
-                    aria-hidden={!expanded}
-                  >
-                    <div className="floor-room-list">
-                      {floorRooms.length ? (
-                        floorRooms.map((room) => (
-                          <button
-                            className={
-                              selected?.type === "room" &&
-                              selected.id === room.id
-                                ? "selected"
-                                : ""
-                            }
-                            key={room.id}
-                            tabIndex={expanded ? 0 : -1}
-                            onClick={() => {
-                              mutate((p) => ({ ...p, selectedFloorId: f.id }));
-                              setSelected({ type: "room", id: room.id });
-                              setPanelMode("selection");
-                              if (tab !== "design") setTab("design");
-                            }}
-                          >
-                            {room.name || "Untitled room"}
-                          </button>
-                        ))
-                      ) : (
-                        <span className="floor-room-empty">
-                          No rooms on this floor
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
           <div className="sidebar-bottom">
             <div>
               <strong>{rooms.length}</strong>
@@ -2647,7 +2613,7 @@ Cancel: ${what} of the optimised design instead.`,
           </div>
         </aside>
         <div className="workspace-content">
-          {tab === "design" && (
+          {tab === "design" && !showPlan && (
             <Ribbon
               workspace={workspace}
               tool={tool}
@@ -2736,6 +2702,54 @@ Cancel: ${what} of the optimised design instead.`,
               compareBusy={compareBusy}
             />
           )}
+          <div className="floor-tabs" role="tablist" aria-label="Floors">
+            <div className="floor-tabs-scroll" ref={floorTabsRef}>
+              {workspace === "cellular" && (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={showPlan}
+                  className={`floor-tab floor-tab-plan ${showPlan ? "active" : ""}`}
+                  onClick={() => {
+                    setPlanView(true);
+                    if (tab !== "design") setTab("design");
+                  }}
+                  title="Design plan: how the floors are joined (BTS, couplers, splitters, risers)"
+                >
+                  <span aria-hidden="true">✎</span> Design plan
+                </button>
+              )}
+              {plan.floors.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={!showPlan && floorId === f.id}
+                  className={`floor-tab ${!showPlan && floorId === f.id ? "active" : ""}`}
+                  title={`${f.name} (double-click to rename)`}
+                  onClick={() => openFloor(f.id)}
+                  onDoubleClick={() => {
+                    const name = window.prompt("Floor name", f.name);
+                    if (name?.trim())
+                      mutate((p) => ({ ...p, floors: p.floors.map((x) => (x.id === f.id ? { ...x, name: name.trim() } : x)) }));
+                  }}
+                >
+                  <span aria-hidden="true">&#x25A4;</span> {f.name}
+                </button>
+              ))}
+              <button type="button" className="floor-tab floor-tab-add" onClick={addFloor} title="Add a floor, empty or a copy of one" aria-label="Add floor">
+                ＋
+              </button>
+            </div>
+            <div className="floor-tabs-nav">
+              <button type="button" aria-label="Scroll floors left" onClick={() => floorTabsRef.current?.scrollBy({ left: -160, behavior: "smooth" })}>
+                ‹
+              </button>
+              <button type="button" aria-label="Scroll floors right" onClick={() => floorTabsRef.current?.scrollBy({ left: 160, behavior: "smooth" })}>
+                ›
+              </button>
+            </div>
+          </div>
           <main className={`main ${tab === "design" ? "main-editor" : ""}`}>
             {message && (
               <div className="notice" role="status">
@@ -2748,7 +2762,20 @@ Cancel: ${what} of the optimised design instead.`,
                 Processing floor plan or session…
               </div>
             )}
-            {tab === "design" && <DesignPanel {...panelProps} />}
+            {tab === "design" && !showPlan && <DesignPanel {...panelProps} />}
+            {showPlan && (
+              <DasSchematic
+                plan={plan}
+                mutate={mutate}
+                uid={uid}
+                carrier={dasCarrier}
+                setMessage={setMessage}
+                onOpenFloor={(id, sourceId) => {
+                  openFloor(id);
+                  if (sourceId) selectEntity({ type: "source", id: sourceId });
+                }}
+              />
+            )}
             {tab === "network" && <NetworkPanel {...panelProps} />}
             {/* kept mounted while hidden: a floor-plan reading carries on when another tab is opened */}
             <div hidden={tab !== "data"}>
@@ -2772,7 +2799,7 @@ Cancel: ${what} of the optimised design instead.`,
           </main>
         </div>
       </div>
-      {tab === "design" && (
+      {tab === "design" && !showPlan && (
       <WorkspaceFooter
         view={view}
         onViewChange={setView}
@@ -2793,6 +2820,9 @@ Cancel: ${what} of the optimised design instead.`,
         isStatic={plan.property?.static !== false}
         onStaticChange={setStatic}
       />
+      )}
+      {addFloorOpen && (
+        <AddFloorDialog plan={plan} currentFloorId={floorId} onAdd={createFloor} onClose={() => setAddFloorOpen(false)} />
       )}
     </div>
     </MeasurementUnitProvider>

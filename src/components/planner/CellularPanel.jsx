@@ -264,7 +264,7 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
             ["splitter", "Splitter"],
             ["coupler", "Coupler"],
             ["combiner", "Combiner"],
-            ["riser", "Riser"],
+            ["riser", "Shaft"],
             ["dascable", "Cable"],
           ].map(([tool, label]) => (
             <button key={tool} type="button" onClick={() => setTool(tool)}>
@@ -273,8 +273,8 @@ export default function CellularPanel({ plan, mutate, cellular, floorId, selecte
           ))}
         </div>
         <p className="hint">
-          Place a source at the shaft, then splitters and couplers; with Cable, click a part and then the part or antenna
-          it feeds. {dasParts(plan).length} parts, {c.cables.length} cables
+          Place the source (BTS), then a shaft (riser) where the feeder goes between floors, then couplers and splitters;
+          with Cable, click a part and then the part or antenna it feeds (the BTS can feed the shaft). {dasParts(plan).length} parts, {c.cables.length} cables
           {carrier && dasFeed ? `, ${Object.keys(dasFeed.antennas).length} of ${allAntennas.length} antennas fed at ${carrierLabel(carrier)}` : ""}.
         </p>
         {dasFeed?.errors.map((e) => (

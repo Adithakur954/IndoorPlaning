@@ -978,7 +978,8 @@ body.resizing-panel {
   }
   .panel-resizer {
     display: none;
-  }
+  }
+
 }
 .editor-grid.panel-closed {
   grid-template-columns: minmax(0, 1fr);
@@ -1953,7 +1954,9 @@ body.resizing-panel {
     grid-template-columns: 1fr;
   }
 }
-@media (max-height: 650px) {
+@media (max-height: 650px) {
+
+
   .alignment-setup {
     gap: 5px;
     padding-block: 6px;
@@ -3115,8 +3118,8 @@ p.warn {
   display: flex;
   align-items: stretch;
   gap: 0;
-  min-height: 94px;
-  padding: 6px 8px 0;
+  min-height: 76px;
+  padding: 6px 8px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
@@ -3144,7 +3147,7 @@ p.warn {
 .ribbon-group-body {
   flex: 1;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 2px;
 }
 .ribbon-group-body.stack {
@@ -3231,18 +3234,64 @@ p.warn {
   grid-auto-flow: column;
   gap: 4px 18px;
 }
-.ribbon-range {
-  display: grid;
-  gap: 3px;
-  font-size: 12.5px;
-}
-.ribbon-range input {
-  width: 150px;
-  accent-color: #0d7662;
-}
 .ribbon .legend-menu {
   align-self: center;
-  margin-top: 12px;
+}
+.ribbon-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: #26514b;
+}
+.ribbon-stepper-box {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  border: 1px solid #cbdad5;
+  border-radius: 6px;
+  background: #fff;
+  overflow: hidden;
+}
+.ribbon-stepper-box button {
+  width: 28px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: #f3f7f5;
+  color: #26514b;
+  font-size: 15px;
+  line-height: 1;
+}
+.ribbon-stepper-box button:hover:not(:disabled) {
+  background: #e3efea;
+}
+.ribbon-stepper-box input {
+  width: 38px;
+  height: 100%;
+  padding: 0 2px 0 0;
+  border: 0;
+  border-radius: 0;
+  text-align: right;
+  font-size: 12.5px;
+  -moz-appearance: textfield;
+}
+.ribbon-stepper-box input::-webkit-outer-spin-button,
+.ribbon-stepper-box input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.ribbon-stepper-box em {
+  padding-right: 6px;
+  font-style: normal;
+  color: #6b817b;
+}
+.ribbon-stepper-box button:first-child {
+  border-right: 1px solid #e0ebe6;
+}
+.ribbon-stepper-box button:last-child {
+  border-left: 1px solid #e0ebe6;
 }
 
 /* ---- Editor status bar: one thin line like a word processor's ------------ */
@@ -3741,4 +3790,683 @@ p.warn {
 }
 .cable-bends .cable-mid:hover circle:nth-of-type(2) {
   fill: #fff3e0;
+}
+
+/* ---- Floor tabs under the ribbon (sheet tabs): Design plan, then each floor ---- */
+.floor-tabs {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  height: 32px;
+  background: #f3f6f5;
+  border-bottom: 1px solid #dce7e2;
+}
+.floor-tabs-scroll {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 0 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.floor-tabs-scroll::-webkit-scrollbar {
+  display: none;
+}
+.floor-tab {
+  flex: none;
+  height: 27px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 200px;
+  padding: 0 12px;
+  border: 1px solid #d3dfda;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: #e8efec;
+  color: #46605a;
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.floor-tab:hover {
+  background: #f1f6f4;
+}
+.floor-tab.active {
+  background: #fff;
+  color: #0b7660;
+  font-weight: 600;
+  height: 29px;
+  margin-bottom: -1px;
+  border-color: #c4d6cf;
+}
+.floor-tab > span {
+  color: #b45309;
+}
+.floor-tab-plan > span {
+  color: #0b7660;
+}
+.floor-tab-add {
+  padding: 0 9px;
+  background: transparent;
+  border-color: transparent;
+  color: #0e806b;
+}
+.floor-tabs-nav {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+  border-left: 1px solid #dce7e2;
+}
+.floor-tabs-nav button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #46605a;
+  font-size: 16px;
+  line-height: 1;
+}
+.floor-tabs-nav button:hover {
+  background: #e0ebe6;
+}
+
+/* ---- Design plan: DAS schematic of all floors ---- */
+.das-schematic {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+.das-schematic-toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #e6eeeb;
+  font-size: 12.5px;
+  color: #46605a;
+}
+.das-schematic-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.das-schematic-toolbar select,
+.das-schematic-toolbar button {
+  box-sizing: border-box;
+  height: 30px;
+  font-size: 12.5px;
+  line-height: normal;
+}
+.das-schematic-toolbar select {
+  padding: 0 26px 0 8px;
+  border: 1px solid #d3dfda;
+  border-radius: 6px;
+  background-color: #fff;
+  color: #2f4741;
+}
+.das-schematic-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid #d3dfda;
+  border-radius: 6px;
+  background: #fff;
+  color: #2f4741;
+  cursor: pointer;
+}
+.das-schematic-toolbar button:hover {
+  background: #f0f8f5;
+}
+.das-schematic-toolbar button.active {
+  background: #fff4ea;
+  border-color: #ea580c;
+  color: #9a3412;
+}
+.das-schematic-toolbar button i {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.das-schematic-split {
+  display: inline-flex;
+}
+.das-schematic-split button {
+  border-radius: 6px 0 0 6px;
+}
+.das-schematic-split select {
+  border-radius: 0 6px 6px 0;
+  border-left: 0;
+  max-width: 150px;
+}
+.das-schematic-sep {
+  width: 1px;
+  height: 20px;
+  background: #dce7e2;
+  margin: 0 4px;
+}
+.das-schematic-fill {
+  flex: 1;
+}
+.das-schematic-band {
+  color: #718b82;
+  font-size: 12px;
+}
+.das-schematic-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.das-schematic-canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+}
+.das-schematic-canvas svg {
+  display: block;
+  min-width: 100%;
+}
+.das-band-name {
+  font-size: 13px;
+  font-weight: 600;
+  fill: #1f3a33;
+}
+.das-band-sub {
+  font-size: 11px;
+  fill: #718b82;
+}
+.das-node {
+  cursor: pointer;
+}
+.das-node:hover rect:first-child {
+  fill: #f7faf9;
+}
+.das-node-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  fill: #1f3a33;
+}
+.das-node-sub {
+  font-size: 10.5px;
+  fill: #6b8079;
+}
+.das-node-power {
+  font-size: 10.5px;
+  font-weight: 600;
+  fill: #0b7660;
+}
+.das-edge {
+  cursor: pointer;
+}
+.das-edge-port,
+.das-edge-len {
+  font-size: 10px;
+  fill: #6b8079;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 3px;
+}
+.das-edge-port {
+  fill: #9a3412;
+  font-weight: 600;
+}
+.das-schematic-empty {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  transform: translate(-50%, -50%);
+  max-width: 420px;
+  padding: 18px 22px;
+  border: 1px dashed #bdd5cb;
+  border-radius: 10px;
+  background: #fafdfb;
+  color: #5b746d;
+  font-size: 13px;
+  text-align: center;
+}
+.das-schematic-inspector {
+  flex: none;
+  width: 250px;
+  overflow-y: auto;
+  padding: 14px;
+  border-left: 1px solid #e6eeeb;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  font-size: 12.5px;
+}
+.das-schematic-inspector h4 {
+  margin: 0;
+  font-size: 14px;
+  color: #1f3a33;
+}
+.das-schematic-inspector label {
+  display: grid;
+  gap: 4px;
+  color: #5b746d;
+}
+.das-schematic-inspector input,
+.das-schematic-inspector select {
+  box-sizing: border-box;
+  padding: 0 8px;
+  line-height: normal;
+  height: 32px;
+  font-size: 12.5px;
+}
+.das-inspector-note {
+  margin: 0;
+  color: #46605a;
+}
+.das-inspector-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.das-inspector-actions button {
+  height: 30px;
+  padding: 0 10px;
+}
+.das-inspector-actions .danger {
+  color: #b91c1c;
+}
+.das-schematic-warnings {
+  flex: none;
+  display: grid;
+  gap: 2px;
+  padding: 6px 12px;
+  border-top: 1px solid #f3d9c4;
+  background: #fff8f1;
+  color: #9a3412;
+  font-size: 12px;
+}
+
+/* Design plan: Import dialog, floors on the left and their items on the right */
+.das-import-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #0b2a2247;
+}
+.das-import-dialog {
+  width: min(820px, 100%);
+  height: min(560px, 100%);
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 24px 60px #0b2a2240;
+  overflow: hidden;
+  font-size: 13px;
+}
+.das-import-dialog header,
+.das-import-dialog footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+}
+.das-import-dialog header {
+  justify-content: space-between;
+  border-bottom: 1px solid #e6eeeb;
+  color: #1f3a33;
+  font-size: 14px;
+}
+.das-import-dialog header button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  font-size: 20px;
+  line-height: 1;
+  color: #5b746d;
+  background: transparent;
+}
+.das-import-dialog footer {
+  justify-content: flex-end;
+  border-top: 1px solid #e6eeeb;
+}
+.das-import-dialog footer button {
+  height: 32px;
+  padding: 0 14px;
+}
+.das-import-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.das-import-main nav {
+  flex: none;
+  width: 200px;
+  overflow-y: auto;
+  padding: 8px;
+  border-right: 1px solid #e6eeeb;
+  background: #f7faf9;
+  display: grid;
+  align-content: start;
+  gap: 2px;
+}
+.das-import-main nav button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #46605a;
+  font-weight: 500;
+  text-align: left;
+}
+.das-import-main nav button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.das-import-main nav button small {
+  flex: none;
+  color: #6b817b;
+  font-size: 11px;
+}
+.das-import-main nav button:hover {
+  background: #edf5f1;
+}
+.das-import-main nav button.active {
+  background: #e0f0ea;
+  color: #0b7660;
+  font-weight: 600;
+}
+.das-import-main section {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.das-import-tools {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  border-bottom: 1px solid #eef3f1;
+  color: #5b746d;
+}
+.das-import-tools label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #1f3a33;
+  font-weight: 600;
+}
+.das-import-tools input,
+.das-import-rows input {
+  margin: 0;
+  padding: 0;
+}
+.das-import-rows {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 8px 10px;
+}
+.das-import-rows h5 {
+  position: sticky;
+  top: 0;
+  margin: 8px 0 2px;
+  padding: 4px 6px;
+  background: #fff;
+  color: #6b817b;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.das-import-rows label {
+  display: grid;
+  grid-template-columns: auto auto minmax(70px, 1fr) minmax(90px, 1.2fr) minmax(110px, 1.6fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.das-import-rows label:hover {
+  background: #f0f8f5;
+}
+.das-import-rows label.on-plan {
+  cursor: default;
+  opacity: 0.6;
+}
+.das-import-rows i {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.das-import-name {
+  color: #1f3a33;
+  font-weight: 600;
+}
+.das-import-type,
+.das-import-model,
+.das-import-cables {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #5b746d;
+  font-size: 12px;
+}
+.das-import-cables {
+  color: #8aa099;
+}
+.das-import-rows em {
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: #e6f4ef;
+  color: #0b7660;
+  font-size: 11px;
+  font-style: normal;
+}
+.das-import-none {
+  margin: 6px;
+  color: #8aa099;
+}
+
+/* Design plan: type filters in the Import window, cable rows, dragging parts */
+.das-import-types {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid #eef3f1;
+}
+.das-import-types button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid #d3dfda;
+  border-radius: 14px;
+  background: #fff;
+  color: #46605a;
+  font-size: 12px;
+  font-weight: 500;
+}
+.das-import-types button i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.das-import-types button small {
+  color: #8aa099;
+  font-size: 11px;
+}
+.das-import-types button:hover {
+  background: #f0f8f5;
+}
+.das-import-types button.active {
+  background: #0b7660;
+  border-color: #0b7660;
+  color: #fff;
+}
+.das-import-types button.active small {
+  color: #d6efe7;
+}
+.das-import-rows i.das-import-wire {
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+  background: #6b8079;
+}
+.das-import-dialog footer .das-import-hint {
+  margin-right: auto;
+  color: #8aa099;
+  font-size: 12px;
+}
+.das-node {
+  cursor: grab;
+  touch-action: none;
+}
+.das-schematic-canvas svg.dragging,
+.das-schematic-canvas svg.dragging .das-node {
+  cursor: grabbing;
+  user-select: none;
+}
+.das-node.is-dragging rect:first-child {
+  filter: drop-shadow(0 4px 8px #0b2a2233);
+}
+.das-schematic-toolbar button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Add floor: empty, or a copy of a floor */
+.add-floor-dialog {
+  width: min(520px, 100%);
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 24px 60px #0b2a2240;
+  font-size: 13px;
+}
+.add-floor-dialog header,
+.add-floor-dialog footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+}
+.add-floor-dialog header {
+  justify-content: space-between;
+  border-bottom: 1px solid #e6eeeb;
+  font-size: 14px;
+  color: #1f3a33;
+}
+.add-floor-dialog header button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 20px;
+  color: #5b746d;
+}
+.add-floor-dialog footer {
+  justify-content: flex-end;
+  border-top: 1px solid #e6eeeb;
+}
+.add-floor-dialog footer button {
+  height: 32px;
+  padding: 0 14px;
+}
+.add-floor-body {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+.add-floor-modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.add-floor-modes label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #d3dfda;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.add-floor-modes label.active {
+  border-color: #0b7660;
+  background: #f0f8f5;
+}
+.add-floor-modes input,
+.add-floor-check input {
+  margin: 2px 0 0;
+  padding: 0;
+}
+.add-floor-modes span {
+  display: grid;
+  gap: 3px;
+}
+.add-floor-modes small {
+  color: #6b817b;
+  font-size: 11.5px;
+}
+.add-floor-copy {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f7faf9;
+}
+.add-floor-check {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  color: #2f4741;
+  cursor: pointer;
+}
+.add-floor-check small {
+  color: #6b817b;
+}
+.add-floor-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 10px;
+}
+.add-floor-field {
+  display: grid;
+  gap: 4px;
+  color: #5b746d;
+}
+.add-floor-field input,
+.add-floor-field select {
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0 8px;
+  line-height: normal;
 }

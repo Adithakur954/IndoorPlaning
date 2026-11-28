@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   bbox,
   boundaryAreas,
@@ -11,6 +11,7 @@ import { materialColors } from "../../config/materialColors.js";
 import PlanCompass from "./PlanCompass.jsx";
 import { Heatmap2D } from "./SmoothHeatmap.jsx";
 import { layoutLabels } from "../../utils/labelLayout.js";
+import { floorImageTiles } from "../../utils/floorRegistration.js";
 import {
   getFloorLogs,
   getLogGridCells,
@@ -18,10 +19,32 @@ import {
   getMetricRanges,
 } from "../../utils/logOverlay.js";
 
-// older projects named detected APs "AP-detected-3": show them as "AP3"
+import { floorSourceLabels } from "../../infra/cellular/floorLabels.js";
+
 const AP_FONT = 0.4;
-const shortApName = (name) =>
-  String(name ?? "").replace(/^AP-detected-(\d+)$/, "AP$1");
+
+function FloorDrawing({ image }) {
+  const imageId = useId();
+  const x = image.offsetX || 0, z = image.offsetZ || 0;
+  const transform = `rotate(${image.rotationDeg || 0} ${x + image.widthM / 2} ${z + image.heightM / 2})`;
+  if (!image.registration) {
+    return <image href={image.url} x={x} y={z} width={image.widthM} height={image.heightM}
+      transform={transform} opacity=".35" preserveAspectRatio="none" pointerEvents="none" />;
+  }
+  return (
+    <g transform={transform} opacity=".35" pointerEvents="none">
+      <defs>
+        <image id={imageId} href={image.url} width="1" height="1" preserveAspectRatio="none" />
+      </defs>
+      {floorImageTiles(image).map((tile) => (
+        <svg key={tile.viewBox} x={tile.x} y={tile.z} width={tile.width} height={tile.height}
+          viewBox={tile.viewBox} preserveAspectRatio="none" overflow="hidden">
+          <use href={`#${imageId}`} />
+        </svg>
+      ))}
+    </g>
+  );
+}
 
 
 
@@ -122,7 +145,7 @@ function SourceSymbol({ s, r, stroke, selected }) {
       <g>
         {box("#374151")}
         <text x={x} y={z} fontSize={r * 0.75} fontWeight={700} fill="white" textAnchor="middle" dominantBaseline="central" pointerEvents="none">
-          {{ cm21: "2x1", cm22: "2x2", cm44: "4x4" }[s.partId] || "CB"}
+          {{ cm21: "2x1", cm22: "2x2", cm44: "4x4", "cm0642-44": "4x4" }[s.partId] || "CB"}
         </text>
       </g>
     );
@@ -131,12 +154,12 @@ function SourceSymbol({ s, r, stroke, selected }) {
       <g>
         <rect x={x - r} y={z - r * 0.7} width={r * 2} height={r * 1.4} rx={r * 0.2} fill={ink} stroke={ring || "white"} strokeWidth={stroke} />
         <text x={x} y={z} fontSize={r * 0.95} fontWeight={700} fill="white" textAnchor="middle" dominantBaseline="central" pointerEvents="none">
-          {String(s.partId || "c").replace(/^c/, "")}
+          {String(s.partId || "").replace(/^(cp0642-|c)/, "")}
         </text>
       </g>
     );
   // splitter: one input on the left, as many outputs fanning to the right as it has ways
-  const ways = { s2: 2, s3: 3, s4: 4 }[s.partId] || 2;
+  const ways = { s2: 2, s3: 3, s4: 4, "sp0642-3w": 3 }[s.partId] || 2;
   const fan = Array.from({ length: ways }, (_, i) => {
     const t = ways === 1 ? 0 : (i / (ways - 1)) * 2 - 1;
     return `M${x - k * 0.1} ${z}L${x + k} ${z + t * k * 0.8}`;
@@ -223,6 +246,7 @@ export default function Plan2D({
     splitTarget = splitWallId ? walls.find((w) => w.id === splitWallId) : null,
     sources = plan.sources.filter((s) => s.floorId === floorId),
     furniture = plan.furniture.filter((f) => f.floorId === floorId);
+  const sourceLabels = floorSourceLabels(sources);
   useEffect(() => {
     // a different floor starts framed on its own content
     setPan({ x: 0, z: 0 });
@@ -688,7 +712,7 @@ export default function Plan2D({
       if (s.kind !== "wifi" || showWifiNames)
         items.push({
           id: `s:${s.id}`,
-          text: shortApName(s.name),
+          text: sourceLabels.get(s.id),
           fontSize: apFont,
           priority: 2,
           preferred: null,
@@ -874,21 +898,7 @@ export default function Plan2D({
             fill="url(#grid)"
           />
         )}
-        {floorImage && shown("image") && (
-          <image
-            href={floorImage.url}
-            x={floorImage.offsetX || 0}
-            y={floorImage.offsetZ || 0}
-            width={floorImage.widthM}
-            height={floorImage.heightM}
-            transform={`rotate(${floorImage.rotationDeg || 0} ${
-              (floorImage.offsetX || 0) + floorImage.widthM / 2
-            } ${(floorImage.offsetZ || 0) + floorImage.heightM / 2})`}
-            opacity=".35"
-            preserveAspectRatio="none"
-            pointerEvents="none"
-          />
-        )}
+        {floorImage && shown("image") && <FloorDrawing image={floorImage} />}
         {heatmap && (
           <Heatmap2D
             cells={predictions}
@@ -1228,7 +1238,7 @@ export default function Plan2D({
             {cableFrom === s.id && (
               <circle cx={s.x} cy={s.z} r={apR * 1.8} fill="none" stroke="#e8790a" strokeWidth={apStroke * 1.5} strokeDasharray={`${apR / 2} ${apR / 3}`} />
             )}
-            {portInfo[s.id] && <title>{portInfo[s.id]}</title>}
+            <title>{portInfo[s.id] || s.name}</title>
             {bar ? (
               <g className="das-bar">
                 <rect
@@ -1253,7 +1263,7 @@ export default function Plan2D({
                   className="plan-label"
                   pointerEvents="none"
                 >
-                  {s.name}
+                  {sourceLabels.get(s.id)}
                 </text>
                 {below.map((o, i) => (
                   <line key={o.id} x1={sideX(below, i)} x2={sideX(below, i)} y1={by + barH} y2={by + barH + endSize * 0.9} stroke="#2f3b39" strokeWidth={apStroke * 0.8} />
@@ -1282,7 +1292,7 @@ export default function Plan2D({
                 className="plan-label"
                 pointerEvents="none"
               >
-                {shortApName(s.name)}
+                {sourceLabels.get(s.id)}
               </text>
             )}
             {s.kind === "cellular" && Number.isFinite(antennaPowers[s.id]) && (

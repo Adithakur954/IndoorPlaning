@@ -47,6 +47,7 @@ function Field({
   options,
   optionLabels, // optional { value: text shown } for the options
   measurement = null,
+  allowEmpty = false,
 }) {
   const unit = useMeasurementUnit();
   const isLength = type === "number" && (measurement === "length" || /\(m\)$/.test(label));
@@ -95,7 +96,9 @@ function Field({
         : label;
   const handleChange = (value) =>
     onChange(
-      isLength
+      allowEmpty && value === ""
+        ? ""
+        : isLength
         ? unitToMetres(value, unit)
         : isArea
           ? unitToSquareMetres(value, unit)

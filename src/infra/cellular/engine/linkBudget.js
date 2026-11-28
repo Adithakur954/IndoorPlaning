@@ -58,8 +58,12 @@ function nodeLossDb(node, nodeId, edge, edgeCount, catalogue) {
         throw new Error(`splitter ${nodeId} has ${edgeCount} outputs but is a ${splitter.ways}-way part`);
       return splitterLossDb(splitter);
     }
-    case "inline":
-      return part(catalogue, "inline", node.partId, nodeId).lossDb;
+    case "inline": {
+      const inline = part(catalogue, "inline", node.partId, nodeId);
+      if (inline.outputs && edgeCount > inline.outputs)
+        throw new Error(`node ${nodeId} has ${edgeCount} outputs but allows ${inline.outputs}`);
+      return inline.lossDb;
+    }
     default:
       throw new Error(`node ${nodeId} has unknown type "${node.type}"`);
   }

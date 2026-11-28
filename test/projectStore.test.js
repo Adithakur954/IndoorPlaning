@@ -193,3 +193,19 @@ test("newer database schemas are rejected without being modified", (t) => {
   assert.throws(() => f.open(), /Unsupported project database version/);
   assert.equal(db.prepare("PRAGMA user_version").get().user_version, 99);
 });
+
+test("a save based on an older version is refused, so a stale window cannot overwrite newer work", (t) => {
+  const store = fixture(t).open();
+  const plan = { floors: [{ id: "f1", name: "F1", elevation: 0 }], rooms: [] };
+  store.create({ id: "p", name: "P", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "v1", plan });
+  // window A saves on top of v1: fine
+  const a = store.save("p", { name: "P", plan, updatedAt: "v2", baseUpdatedAt: "v1" });
+  assert.equal(a.updatedAt, "v2");
+  // an import (no base) writes v3
+  const newer = { ...plan, floors: [...plan.floors, { id: "f2", name: "F2", elevation: 3 }] };
+  assert.equal(store.save("p", { name: "P", plan: newer, updatedAt: "v3" }).updatedAt, "v3");
+  // window B still holds v1: refused, and told the stored version
+  const stale = store.save("p", { name: "P", plan, updatedAt: "v4", baseUpdatedAt: "v1" });
+  assert.equal(stale.conflict.updatedAt, "v3");
+  assert.equal(store.get("p").plan.floors.length, 2);
+});

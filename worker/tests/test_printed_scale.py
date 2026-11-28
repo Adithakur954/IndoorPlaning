@@ -8,6 +8,15 @@ from PIL import Image, ImageDraw, ImageFont
 
 from floorplan import printed_scale as ps
 
+class DimensionConflictTest(unittest.TestCase):
+    def test_detects_a_total_entered_for_a_single_dimension(self):
+        lines = [{"a": [878.2, 197.5], "b": [878.2, 529], "metres": 36}]
+        scale = {"pointC": [878, 529], "pointD": [878, 197], "heightM": 52}
+        self.assertEqual(ps.dimension_conflicts(scale, lines),
+                         [{"segment": "C-D", "enteredM": 52, "printedM": 36}])
+        self.assertEqual(ps.dimension_conflicts({**scale, "heightM": 36}, lines), [])
+        self.assertEqual(ps.dimension_conflicts({**scale, "pointD": [878, 87]}, lines), [])
+
 FONT = next((p for p in ("C:/Windows/Fonts/arial.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf") if Path(p).exists()), None)
 
 

@@ -112,8 +112,9 @@ export function DasPartInspector({ plan, part, mutate, cellular }) {
       )}
       {part.dasType === "riser" && (
         <p className="hint">
-          Where the cable changes floor: draw a cable from the shaft part on one floor to a riser on the next (the floor height
-          is added to its length), then go on from the riser. Riser cables default to the 7/8" low-loss feeder.
+          The shaft, where the feeder changes floor. It is not a source: it takes a cable from the BTS (or any part) and
+          passes it on to the next floor's shaft or part (the floor height is added to the cable length). Shaft cables default
+          to the 7/8" low-loss feeder.
         </p>
       )}
       {carrier && Number.isFinite(inDbm) && (
@@ -153,6 +154,7 @@ export function DasCableInspector({ plan, cable, mutate, cellular, onDelete }) {
       cellular: { ...p.cellular, cables: (p.cellular?.cables || []).map((x) => (x.id === cable.id ? { ...x, ...fields } : x)) },
     }));
   const lengthM = cableLengthM(plan, cable);
+  const hasSpecifiedLength = Number.isFinite(cable.specifiedLengthM) && cable.specifiedLengthM >= 0;
   const loss = carrier ? cableLossAt(plan, cable, carrier.freqMHz) : null;
   const ports = from ? outputPorts(plan, from) : [];
   return (
@@ -170,7 +172,17 @@ export function DasCableInspector({ plan, cable, mutate, cellular, onDelete }) {
         optionLabels={Object.fromEntries(Object.values(dasCatalogue(plan).cables).map((x) => [x.id, x.name]))}
         onChange={(v) => patch({ cableId: v })}
       />
-      <Field label="Extra length (m)" type="number" value={cable.extraM ?? 0} onChange={(v) => patch({ extraM: Number(v) || 0 })} />
+      <Field
+        label="Specified length (m)"
+        type="number"
+        min={0}
+        allowEmpty
+        value={hasSpecifiedLength ? cable.specifiedLengthM : ""}
+        onChange={(v) => patch({ specifiedLengthM: String(v).trim() === "" ? null : Math.max(0, Number(v) || 0) })}
+      />
+      {!hasSpecifiedLength && (
+        <Field label="Extra length (m)" type="number" value={cable.extraM ?? 0} onChange={(v) => patch({ extraM: Number(v) || 0 })} />
+      )}
       <Field label="Connectors" type="number" value={cable.connectors ?? 2} onChange={(v) => patch({ connectors: Math.max(0, Math.round(Number(v) || 0)) })} />
       {ports.length > 1 && (
         // the output this cable leaves from: its own or a free one
@@ -186,8 +198,9 @@ export function DasCableInspector({ plan, cable, mutate, cellular, onDelete }) {
         Connectors: {connectorOf(from)} → {connectorOf(to)}.
       </p>
       <p className="hint">
-        Length {fmt(lengthM)} m (along the plan{from && to && from.floorId !== to.floorId ? " plus the floor height" : ""}
-        {Number(cable.extraM) ? ` plus ${fmt(Number(cable.extraM))} m extra` : ""}).
+        Length {fmt(lengthM)} m {hasSpecifiedLength
+          ? "(specified cable length)."
+          : `(along the plan${from && to && from.floorId !== to.floorId ? " plus the floor height" : ""}${Number(cable.extraM) ? ` with ${fmt(Number(cable.extraM))} m adjustment` : ""}).`}
         {loss && !loss.error && carrier
           ? ` Loss at ${carrierLabel(carrier)}: cable ${fmt(loss.cableDb)} dB + connectors ${fmt(loss.connectorsDb)} dB = ${fmt(loss.totalDb)} dB.`
           : ""}
@@ -338,13 +351,13 @@ export function DasToolBar({
       )}
       {tool === "riser" && (
         <>
-          <strong>Riser: {dasCatalogue(plan).risers[dasOptions.riser]?.model || dasCatalogue(plan).risers[dasOptions.riser]?.name || "–"}</strong>
+          <strong>Shaft: {dasCatalogue(plan).risers[dasOptions.riser]?.model || dasCatalogue(plan).risers[dasOptions.riser]?.name || "–"}</strong>
           {onPartSettings && (
             <button type="button" onClick={onPartSettings}>
               Change…
             </button>
           )}
-          <small>Click on the plan to place the riser (where the cable changes floor).</small>
+          <small>Click on the plan to place the shaft (where the feeder changes floor).</small>
         </>
       )}
       {tool === "dassource" && <small>Click on the plan to place the source (BTS / repeater).</small>}

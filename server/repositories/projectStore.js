@@ -164,9 +164,16 @@ export function openProjectStore({ databaseFile, legacyFile }) {
         return { ...details, plan: JSON.parse(planJson) };
       },
       create: (item) => transaction(() => insert(item)),
-      save(id, { name, plan, updatedAt }) {
+      // baseUpdatedAt: the version the caller loaded or last saved. When the
+      // stored project is newer (saved from another window, or an import), the
+      // save is refused: { conflict: the stored project }.
+      save(id, { name, plan, updatedAt, baseUpdatedAt }) {
         return transaction(() => {
           if (!validPlan(plan)) throw new Error("Invalid project plan");
+          if (baseUpdatedAt) {
+            const current = this.get(id);
+            if (current && current.updatedAt !== baseUpdatedAt) return { conflict: current };
+          }
           const result = update.run(
             name,
             updatedAt,

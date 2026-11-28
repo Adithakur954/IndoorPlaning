@@ -20,7 +20,14 @@ Browser
                              data/projects.sqlite
 ```
 
-`npm run dev` starts the Vite frontend and the local API. The development launcher chooses available ports and configures the Vite API proxy. In production, `server/app.js` serves the Vite `dist` files when present and falls back to `index.html` for client routes.
+`npm run dev` starts Vite, the local API, and the Rust simulation service. Tauri dev runs the same launcher. The launcher configures each proxy from its service's port. Tauri dev uses Vite port 5173, and browser-only development can override `VITE_PORT`. In production, `server/app.js` serves the Vite `dist` files when present and falls back to `index.html` for client routes.
+
+To align an existing floor drawing and its geometry to a common building grid, run
+`node scripts/register-floor.mjs data/projects.sqlite controls.json`. The control file
+contains `projectId`, `floorId`, and `x` and `z` arrays of `[current, reference]`
+positions in metres. Use `fixedIds` for entities already on the reference grid.
+Append `--apply` to create a database backup and save the registration after review.
+Reload the project before editing and rerun predictions that use the adjusted floor.
 
 ## Project lifecycle and state
 

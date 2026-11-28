@@ -197,11 +197,8 @@ python -m venv .venv
 #   Linux:   apt install llvm   (or set DRJIT_LIBLLVM_PATH to libLLVM.so)
 # GPU: an NVIDIA driver recent enough for your GPU (CUDA/OptiX come from the driver).
 
-# Service
+# App, API and simulation service
 cd ..
-npm run sim:service        # http://127.0.0.1:3002 (SIM_PORT)
-
-# App (Vite proxies /api/scenes and /api/simulations to the service)
 npm run dev
 ```
 

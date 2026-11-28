@@ -297,6 +297,8 @@ def _reconstruct(image_path: str | Path, out_dir: str | Path, *, scale: dict | N
             aspect_y = kx / ky
             warnings.append(f"your two lengths show the picture is stretched by {stretch_pct:.1f} % "
                             f"({kx:.2f} px/m across, {ky:.2f} px/m up-down): its height was corrected")
+    dimension_conflicts = _ps.dimension_conflicts(scale, printed_lines)
+    dimensions_verified = (scale or {}).get("verifiedDimensionLabels") is True
     if aspect_y != 1.0 and scale and scale.get("pointA") and scale.get("pointB"):
         # the picture is made square before anything else: the vertical coordinate of the clicked points follows it
         scale = {**scale, "pointA": [scale["pointA"][0], scale["pointA"][1] * aspect_y],
@@ -853,8 +855,11 @@ def _reconstruct(image_path: str | Path, out_dir: str | Path, *, scale: dict | N
                                  if two else None),
                   # the user checked the scale both ways: two lengths, or one length and "the picture is not
                   # stretched". Only then are the metres trusted for the editor.
-                  "confirmed": bool(two) or bool(px_per_m and (scale or {}).get("notStretched")
-                                                 and scale_source.startswith("user")),
+                  "dimensionConflicts": dimension_conflicts,
+                  "dimensionsVerified": dimensions_verified,
+                  "confirmed": (bool(two) or bool(px_per_m and (scale or {}).get("notStretched")
+                                                  and scale_source.startswith("user")))
+                               and (not dimension_conflicts or dimensions_verified),
                   "needsInput": px_per_m is None, "auto": auto_scale,
                   "widthM": round(w / px_per_m, 3) if px_per_m else None,
                   "heightM": round(h / px_per_m, 3) if px_per_m else None},

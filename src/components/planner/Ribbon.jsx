@@ -90,11 +90,47 @@ function Check({ label, checked, onChange, title }) {
     </label>
   );
 }
+// Opacity of the prediction image: a percentage typed in, or changed 5% at a time with − / +.
+const OPACITY_MIN = 10;
+const OPACITY_MAX = 100;
+const OPACITY_STEP = 5;
+function OpacityStepper({ value, onChange }) {
+  const pct = Math.round(value * 100);
+  const set = (next) => {
+    const n = Math.round(Number(next));
+    if (!Number.isFinite(n)) return;
+    onChange(Math.min(OPACITY_MAX, Math.max(OPACITY_MIN, n)) / 100);
+  };
+  return (
+    <div className="ribbon-stepper" title="Opacity of the prediction image">
+      <span>Opacity</span>
+      <div className="ribbon-stepper-box">
+        <button type="button" aria-label="Less opaque" disabled={pct <= OPACITY_MIN} onClick={() => set(pct - OPACITY_STEP)}>
+          −
+        </button>
+        <input
+          type="number"
+          aria-label="Opacity, percent"
+          min={OPACITY_MIN}
+          max={OPACITY_MAX}
+          step={OPACITY_STEP}
+          value={pct}
+          onChange={(e) => e.target.value !== "" && set(e.target.value)}
+        />
+        <em>%</em>
+        <button type="button" aria-label="More opaque" disabled={pct >= OPACITY_MAX} onClick={() => set(pct + OPACITY_STEP)}>
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Group({ label, children, stack = false }) {
   return (
     <div className="ribbon-group" role="group" aria-label={label}>
+      {/* the group name is for screen readers only: no caption under the buttons */}
       <div className={`ribbon-group-body${stack ? " stack" : ""}`}>{children}</div>
-      <div className="ribbon-group-label">{label}</div>
     </div>
   );
 }
@@ -287,7 +323,7 @@ export default function Ribbon(props) {
                     {toolBtn("splitter", "splitter", "Splitter")}
                     {toolBtn("coupler", "coupler", "Coupler")}
                     {toolBtn("combiner", "combiner", "Combiner")}
-                    {toolBtn("riser", "riser", "Riser", "Where a cable changes floor")}
+                    {toolBtn("riser", "riser", "Shaft", "Shaft (riser): takes the feeder from the BTS or a part and carries it to another floor")}
                   </Group>
                   <Group label="Cables">{toolBtn("dascable", "cable", "Cable", "Join parts and antennas with a cable")}</Group>
                   <Group label="Settings">
@@ -321,17 +357,7 @@ export default function Ribbon(props) {
                 {overlay("heatmap") && (
                   <Check label={overlay("heatmap").label} checked={overlay("heatmap").checked} onChange={overlay("heatmap").onChange} />
                 )}
-                <label className="ribbon-range" title="Opacity of the prediction image">
-                  <span>Opacity {Math.round(heatmapOpacity * 100)}%</span>
-                  <input
-                    type="range"
-                    min="10"
-                    max="100"
-                    step="5"
-                    value={Math.round(heatmapOpacity * 100)}
-                    onChange={(e) => setHeatmapOpacity(Number(e.target.value) / 100)}
-                  />
-                </label>
+                <OpacityStepper value={heatmapOpacity} onChange={setHeatmapOpacity} />
               </Group>
               <Group label="Legend">
                 <LegendMenu sections={legendSections} onChange={setLegendSections} />

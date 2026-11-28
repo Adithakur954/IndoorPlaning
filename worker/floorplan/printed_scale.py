@@ -140,6 +140,39 @@ def two_length_scale(scale: dict | None) -> tuple[float, float] | None:
     return float(1 / np.sqrt(u)), float(1 / np.sqrt(v))
 
 
+def dimension_conflicts(scale: dict | None, printed_lines: list[dict]) -> list[dict]:
+    """Compare an entered dimension only with a print label on those same endpoints."""
+    if not scale:
+        return []
+    def distance(p, q):
+        return np.linalg.norm(np.subtract(p, q))
+
+    conflicts = []
+    for start, end, field in (("A", "B", "lengthM"), ("C", "D", "heightM")):
+        a, b = (scale.get(f"point{key}") for key in (start, end))
+        if a is None or b is None or not scale.get(field):
+            continue
+        # Match both endpoints, in either order. A neighbouring dimension or one
+        # section of a dimension chain is not a reference for the whole chain.
+        tolerance = min(12, max(3, distance(a, b) * 0.025))
+        matches = []
+        for line in printed_lines:
+            c, d = line["a"], line["b"]
+            error = min(max(distance(a, c), distance(b, d)),
+                        max(distance(a, d), distance(b, c)))
+            if error <= tolerance:
+                matches.append(float(line["metres"]))
+        if not matches:
+            continue
+        size = matches[0]
+        if any(abs(m - size) > max(0.05, size * 0.01) for m in matches[1:]):
+            continue
+        entered = float(scale[field])
+        if abs(entered - size) > max(0.05, size * 0.01):
+            conflicts.append({"segment": f"{start}-{end}", "enteredM": entered, "printedM": size})
+    return conflicts
+
+
 def estimate(colour: np.ndarray, texts: list[dict]) -> dict:
     """{"pxPerM", "confidence", "votes", "spreadPct", "found": [...]} or {"pxPerM": None, ...}."""
     found = []

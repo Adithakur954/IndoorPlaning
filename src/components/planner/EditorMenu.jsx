@@ -17,7 +17,7 @@ const toolLabels = {
   splitter: "Splitter",
   coupler: "Coupler",
   combiner: "Combiner",
-  riser: "Riser",
+  riser: "Shaft (riser)",
   dascable: "Cable",
   wifi: "Wi-Fi AP",
 };

@@ -62,6 +62,7 @@ export default function FloorplanImport({
     onBusyChange?.(busy);
   }, [busy]); // eslint-disable-line react-hooks/exhaustive-deps
   const [result, setResult] = useState(null);
+  const [appliedScale, setAppliedScale] = useState(null);
   const [view, setView] = useState("overlay.png");
   const [replace, setReplace] = useState(true);
   const [engine, setEngine] = useState("auto");   // auto = learned model when available | hybrid | classical
@@ -132,6 +133,8 @@ export default function FloorplanImport({
       : abOk && notStretched
         ? { pointA: orig(pts.A), pointB: orig(pts.B), lengthM: length, notStretched: true }
         : null;
+  const scaleIsCurrent = Boolean(scale) && JSON.stringify(scale) === appliedScale;
+  const canUseInEditor = scaleIsCurrent && result?.scale.pxPerM && result.scale.confirmed;
   const scaleNote = two
     ? `Across ${(two.xPxPerM * unitToMetres(1, unit)).toFixed(2)} px/${unit} · up-down ${(two.yPxPerM * unitToMetres(1, unit)).toFixed(2)} px/${unit} · ` +
       (two.stretchPct > 1
@@ -162,6 +165,7 @@ export default function FloorplanImport({
           setBusy(st.status === "running" ? "Detecting walls, openings and rooms…" : "Queued…"),
       });
       setResult(done);
+      setAppliedScale(givenScale ? JSON.stringify({ ...givenScale, verifiedDimensionLabels: undefined }) : null);
       setView("overlay.png");
       onFinished?.(true);
       // sizes printed on the drawing: A-B and C-D are placed on their dimension lines for you to check (only on
@@ -195,6 +199,7 @@ export default function FloorplanImport({
   };
 
   const useInEditor = async () => {
+    if (!canUseInEditor) return;
     try {
       setBusy("Building the plan…");
       const converted = reconstructionToPlan(result, floorId);
@@ -391,8 +396,8 @@ export default function FloorplanImport({
           </label>
           <button
             className="primary"
-            disabled={Boolean(busy) || !result.scale.pxPerM || !result.scale.confirmed}
-            title={result.scale.pxPerM && result.scale.confirmed ? "" : "Confirm the scale below first (A-B and C-D, then Apply)"}
+            disabled={Boolean(busy) || !canUseInEditor}
+            title={canUseInEditor ? "" : "Confirm the scale below first (A-B and C-D, then Apply)"}
             onClick={useInEditor}
           >
             Use in the editor
@@ -403,7 +408,7 @@ export default function FloorplanImport({
       {upload && result && (
         <section className="scale-step">
           <h3>Scale</h3>
-          {result.scale.pxPerM && result.scale.confirmed ? (
+          {canUseInEditor ? (
             <p className="panel-note">
               Scale confirmed: {(result.scale.pxPerM * unitToMetres(1, unit)).toFixed(1)} px per {unit} ({result.scale.source}).
               {result.scale.twoLengths && result.scale.twoLengths.stretchPct > 1
@@ -420,6 +425,12 @@ export default function FloorplanImport({
             </p>
           )}
           {printedNote && <p className="panel-note">{printedNote}</p>}
+          {scaleIsCurrent && result.scale.dimensionConflicts?.map(({ segment, enteredM, printedM }) => (
+            <p key={segment} className={result.scale.dimensionsVerified ? "hint" : "warn"}>
+              {segment} spans a line the drawing reader labels {formatLength(printedM, unit)}.
+              {" "}You entered {formatLength(enteredM, unit)}. Check the endpoints and dimension label.
+            </p>
+          ))}
           <ol className="calibrate-steps">
             <li className={pts.A && pts.B ? "done" : "now"}>
               Click both ends of a length you know across the plan: points <b>A</b> and <b>B</b>.
@@ -532,6 +543,11 @@ export default function FloorplanImport({
           <button className="primary" disabled={Boolean(busy) || !scale} onClick={() => detect(scale)}>
             Apply this scale
           </button>
+          {scaleIsCurrent && !!result.scale.dimensionConflicts?.length && !result.scale.dimensionsVerified && (
+            <button type="button" disabled={Boolean(busy) || !scale} onClick={() => detect({ ...scale, verifiedDimensionLabels: true })}>
+              I checked the endpoints and verified my dimensions
+            </button>
+          )}
         </section>
       )}
       {upload && (

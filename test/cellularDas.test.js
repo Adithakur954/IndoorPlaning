@@ -172,3 +172,35 @@ test("DAS parts are never in a Wi-Fi or cellular scene", async () => {
   const cell = await buildSceneFiles(plan, { sources: "cellular" });
   assert.deepEqual(cell.config.accessPoints.map((a) => a.id).sort(), ["a1", "a2", "a3"]);
 });
+
+test("a specified cable length stays fixed when a floor moves", () => {
+  const plan = dasPlan();
+  const cable = { ...plan.cellular.cables[0], specifiedLengthM: 12.5 };
+  assert.equal(cableLengthM(plan, cable), 12.5);
+  const moved = {
+    ...plan,
+    sources: plan.sources.map((source) => ({ ...source, x: source.x * 2 })),
+  };
+  assert.equal(cableLengthM(moved, cable), 12.5);
+  assert.notEqual(cableLengthM(moved, { ...cable, specifiedLengthM: null }), 12.5);
+});
+
+test("the four combiner outputs each use the specified insertion loss", () => {
+  const plan = dasPlan();
+  const combiner = newDasPart(plan, "combiner", "f0", { x: 10, z: 10 }, "cb", { partId: "cm0642-44" });
+  const antenna = plan.sources.find((source) => source.id === "a1");
+  plan.sources.push(combiner, { ...antenna, id: "a4" }, { ...antenna, id: "a5" });
+  plan.cellular.cables = [];
+  const connect = (from, to) => {
+    assert.equal(cableProblem(plan, from, to), null);
+    const cable = newCable(plan, from, to, to);
+    plan.cellular.cables.push({ ...cable, specifiedLengthM: 0, connectors: 0 });
+  };
+  connect("src", "cb");
+  for (const to of ["a1", "a2", "a3", "a4"]) connect("cb", to);
+  assert.deepEqual(outputPorts(plan, combiner).map((port) => port.id), ["out1", "out2", "out3", "out4"]);
+  assert.match(cableProblem(plan, "cb", "a5"), /already/);
+  const budget = dasPowers(plan, band2300);
+  assert.deepEqual(budget.errors, []);
+  for (const to of ["a1", "a2", "a3", "a4"]) near(budget.antennas[to].powerDbm, 36.8);
+});

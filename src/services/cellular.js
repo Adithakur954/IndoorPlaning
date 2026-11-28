@@ -1,6 +1,8 @@
 // Client for the cellular (IBS/DAS) prediction of the simulation service. A
 // separate route and worker from the Wi-Fi prediction; the run's status and maps
 // are read the same way (simulation.js).
+import { SERVICE_DOWN } from "./simulation.js";
+
 const json = async (response) => {
   const body = await response.json().catch(() => null);
   if (!response.ok) {
@@ -8,7 +10,7 @@ const json = async (response) => {
     throw Error(
       body?.error ||
         (response.status >= 500
-          ? "Cannot reach the simulation service. Start it with `npm run sim:service` (port 3002) and try again."
+          ? SERVICE_DOWN
           : `Request failed (${response.status})`),
     );
   }
@@ -22,7 +24,7 @@ export const submitCellularPrediction = async (sceneId, request, fresh = false) 
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ sceneId, ...request, fresh }),
     }).catch(() => {
-      throw Error("Cannot reach the simulation service. Start it with `npm run sim:service` (port 3002) and try again.");
+      throw Error(SERVICE_DOWN);
     }),
   );
 

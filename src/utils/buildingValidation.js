@@ -125,15 +125,17 @@ export function validateBuilding(plan, floorId) {
   const image = plan.images?.[floorId];
   if (image && rooms.length) {
     const margin = 1;
-    const outside = rooms.filter((r) => {
-      const b = bbox(r);
-      return (
-        b.minX < -margin ||
-        b.minZ < -margin ||
-        b.maxX > image.widthM + margin ||
-        b.maxZ > image.heightM + margin
-      );
-    });
+    const halfWidth = image.widthM / 2;
+    const halfHeight = image.heightM / 2;
+    const centerX = (Number(image.offsetX) || 0) + halfWidth;
+    const centerZ = (Number(image.offsetZ) || 0) + halfHeight;
+    const angle = ((Number(image.rotationDeg) || 0) * Math.PI) / 180;
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    const outside = rooms.filter((room) => pointsOf(room).some((point) => {
+      const dx = point.x - centerX, dz = point.z - centerZ;
+      return Math.abs(dx * cos + dz * sin) > halfWidth + margin ||
+        Math.abs(dz * cos - dx * sin) > halfHeight + margin;
+    }));
     if (outside.length)
       warnings.push(
         `${outside.length} room(s) lie outside the floor image: the drawing and the rooms may be misaligned.`,

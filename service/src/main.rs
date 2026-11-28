@@ -51,29 +51,32 @@ async fn main() {
     let port: u16 = env_or("SIM_PORT", 3002);
     // Results no project refers to any more (a run that was replaced, a deleted
     // project) are removed at start-up; very recent ones may not be saved yet.
-    let removed = match indoor_sim_service::maintenance::referenced_job_ids(&cfg.projects_file) {
-        Ok(keep) => indoor_sim_service::maintenance::cleanup_orphans(
-            &cfg,
-            &keep,
-            Duration::from_secs(env_or("ORPHAN_MIN_AGE_SECS", 600)),
-        ),
-        Err(error) => {
-            eprintln!("skipping result cleanup: {error}");
-            0
+    if std::env::var("SIM_SKIP_STARTUP_CLEANUP").as_deref() != Ok("1") {
+        let removed = match indoor_sim_service::maintenance::referenced_job_ids(&cfg.projects_file) {
+            Ok(keep) => indoor_sim_service::maintenance::cleanup_orphans(
+                &cfg,
+                &keep,
+                Duration::from_secs(env_or("ORPHAN_MIN_AGE_SECS", 600)),
+            ),
+            Err(error) => {
+                eprintln!("skipping result cleanup: {error}");
+                0
+            }
+        };
+        if removed > 0 {
+            println!("removed {removed} saved result(s) no project refers to");
         }
-    };
-    if removed > 0 {
-        println!("removed {removed} saved result(s) no project refers to");
     }
     let (state, rx) = jobs::new_state(cfg);
     jobs::spawn_runners(state.clone(), rx);
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
         .await
         .expect("cannot bind port");
+    let port = listener.local_addr().unwrap().port();
     if let Ok(file) = std::env::var("DESKTOP_READY_FILE") {
         std::fs::write(
             file,
-            serde_json::json!({ "port": listener.local_addr().unwrap().port() }).to_string(),
+            serde_json::json!({ "port": port }).to_string(),
         )
         .expect("cannot report desktop readiness");
     }

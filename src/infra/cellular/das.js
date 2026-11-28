@@ -1,5 +1,7 @@
 // The passive DAS network of a cellular project, as drawn in the editor:
 //   parts  = plan sources of kind "das" (dasType "source" | "splitter" | "coupler" | "combiner" | "riser")
+//   "source" is the BTS / repeater (it only feeds cables); "riser" is the shaft: it takes a
+//   cable from the BTS or any part and carries the feeder on to another floor.
 //   cables = plan.cellular.cables: [{ id, from, to, cableId, extraM, connectors, port? }]
 // and the cellular antennas (kind "cellular") at the ends. Each source (BTS or
 // repeater, one output power per band) feeds a tree; every connected antenna
@@ -14,7 +16,7 @@ export const DAS_TYPES = {
   splitter: { label: "Splitter", short: "SP", engine: "splitter" },
   coupler: { label: "Coupler", short: "C", engine: "coupler" },
   combiner: { label: "Combiner", short: "CB", engine: "inline" },
-  riser: { label: "Riser", short: "R", engine: "riser" },
+  riser: { label: "Shaft (riser)", short: "R", engine: "riser" },
 };
 export const DEFAULT_SOURCE_POWER_DBM = 43;
 // horizontal runs: the 1/2" superflex feeder of the supplied design; the riser
@@ -78,6 +80,8 @@ export function cableRoute(plan, cable) {
 // Cable length: the run along its route on the plan, the height between floors
 // and any extra length typed (up and down walls, slack). A jumper is its fixed length.
 export function cableLengthM(plan, cable) {
+  if (Number.isFinite(cable.specifiedLengthM) && cable.specifiedLengthM >= 0)
+    return cable.specifiedLengthM;
   const extra = Number(cable.extraM) || 0;
   const fixed = dasCatalogue(plan).cables[cable.cableId]?.fixedLengthM;
   if (fixed) return fixed + extra;
@@ -107,7 +111,8 @@ export function cableProblem(plan, fromId, toId) {
     const ways = dasCatalogue(plan).splitters[from.partId]?.ways ?? 2;
     if (out >= ways) return `${from.name} is a ${ways}-way splitter and all its outputs are used.`;
   }
-  if ((from.dasType === "riser" || from.dasType === "combiner") && out >= 1)
+  const inlineOutputs = from.dasType === "combiner" ? (dasCatalogue(plan).inline[from.partId]?.outputs ?? 1) : 1;
+  if ((from.dasType === "riser" || from.dasType === "combiner") && out >= inlineOutputs)
     return `${from.name} already continues to another part.`;
   // no loops: the new end must not lead back to the start
   const below = new Set([toId]);
@@ -251,6 +256,45 @@ export function moveCableBends(plan, moved, fn) {
   };
 }
 
+// The plan with a part turned into another kind (a BTS that should have been a
+// shaft, a splitter that should be a coupler, ...), or { problem } when its cables
+// do not fit the new kind. Its cables, name and place stay.
+export function changeDasType(plan, id, dasType) {
+  const part = plan.sources.find((s) => s.id === id);
+  if (!part || part.kind !== "das" || !DAS_TYPES[dasType]) return { problem: "Choose a DAS part." };
+  if (part.dasType === dasType) return { plan };
+  const cables = cellularOf(plan).cables;
+  const outs = cables.filter((c) => c.from === id).length;
+  const fed = cables.some((c) => c.to === id);
+  const label = DAS_TYPES[dasType].label;
+  if (dasType === "source" && fed) return { problem: `${part.name} is fed by a cable: a source (BTS) cannot take a cable in. Delete that cable first.` };
+  const catalogue = dasCatalogue(plan);
+  const partId =
+    dasType === "splitter" ? Object.values(catalogue.splitters).find((x) => x.ways >= outs)?.id
+      : dasType === "coupler" ? "c10"
+        : dasType === "combiner" ? "cm21"
+          : dasType === "riser" ? "riser"
+            : undefined;
+  const max = dasType === "source" ? Infinity : dasType === "splitter" ? (catalogue.splitters[partId]?.ways ?? 0) : dasType === "coupler" ? 2 : 1;
+  if (outs > max || (dasType === "splitter" && !partId))
+    return { problem: `${part.name} feeds ${outs} cables: a ${label.toLowerCase()} has ${max === 1 ? "one output" : `${max} outputs`}. Delete the extra cables first.` };
+  const next = { ...part, dasType };
+  delete next.partId;
+  delete next.powerDbm;
+  if (partId) next.partId = partId;
+  if (dasType === "source") next.powerDbm = part.powerDbm || {};
+  // the outputs are named again for the new kind (Out 1.. / Through, Tap / Out)
+  // eslint-disable-next-line no-unused-vars
+  const renamed = cables.map((c) => (c.from === id ? (({ port, ...rest }) => rest)(c) : c));
+  return {
+    plan: {
+      ...plan,
+      sources: plan.sources.map((s) => (s.id === id ? next : s)),
+      cellular: { ...(plan.cellular || {}), cables: renamed },
+    },
+  };
+}
+
 // ---------- ports ----------
 // Connector of each part (datasheets: splitters, couplers, antennas N female;
 // combiners 4.3-10 female).
@@ -264,6 +308,7 @@ const portLabel = (id) =>
 export function outputPorts(plan, part) {
   if (!part || part.kind !== "das") return [];
   const cables = cellularOf(plan).cables.filter((c) => c.from === part.id);
+  const combinerOutputs = part.dasType === "combiner" ? (dasCatalogue(plan).inline[part.partId]?.outputs ?? 1) : 1;
   const ids =
     part.dasType === "splitter"
       ? Array.from({ length: dasCatalogue(plan).splitters[part.partId]?.ways ?? 2 }, (_, i) => `out${i + 1}`)
@@ -271,7 +316,9 @@ export function outputPorts(plan, part) {
         ? ["through", "tap"]
         : part.dasType === "source"
           ? Array.from({ length: Math.max(1, cables.length + 1) }, (_, i) => `out${i + 1}`) // a source feeds as many trunks as needed
-          : ["out"];
+          : combinerOutputs > 1
+            ? Array.from({ length: combinerOutputs }, (_, i) => `out${i + 1}`)
+            : ["out"];
   const ports = ids.map((id) => ({ id, label: portLabel(id), cableId: null }));
   const unplaced = [];
   for (const c of cables) {

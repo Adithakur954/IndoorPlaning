@@ -6,7 +6,10 @@ export async function api(url, options = {}) {
   if (!response.ok) {
     if (response.status === 402) window.dispatchEvent(new Event("license-required"));
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.error || `Request failed (${response.status})`);
+    const error = new Error(body.error || `Request failed (${response.status})`);
+    error.status = response.status;
+    error.body = body;
+    throw error;
   }
   return response.status === 204 ? null : response.json();
 }

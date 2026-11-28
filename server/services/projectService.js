@@ -25,11 +25,12 @@ export async function createProject({ name, plan }) {
   });
 }
 
-export async function saveProject(id, { name, plan }) {
+export async function saveProject(id, { name, plan, baseUpdatedAt }) {
   return projectStore().save(id, {
     name: name.trim(),
     plan,
     updatedAt: new Date().toISOString(),
+    baseUpdatedAt: typeof baseUpdatedAt === "string" ? baseUpdatedAt : undefined,
   });
 }
 

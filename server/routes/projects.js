@@ -30,6 +30,11 @@ projectRouter.put("/:id", async (req, res) => {
       .status(400)
       .json({ error: "Name and a valid plan are required" });
   const project = await saveProject(req.params.id, req.body);
+  if (project?.conflict)
+    return res.status(409).json({
+      error: "This project was changed elsewhere since it was opened.",
+      project: project.conflict,
+    });
   return project
     ? res.json(project)
     : res.status(404).json({ error: "Project not found" });
